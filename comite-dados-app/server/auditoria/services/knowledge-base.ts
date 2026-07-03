@@ -1,6 +1,6 @@
-import { db } from "../../db";
+import { getDb } from "../../db";
 import * as auditoriaSchema from "../../db-auditoria";
-import { copilotKnowledgeBase, selfHealingKnowledgeBase, aiCostSavingsLog } from "../../db";
+import { copilotKnowledgeBase, selfHealingKnowledgeBase, aiCostSavingsLog } from "../../db-auditoria";
 import { eq, and, gt, desc, or, isNull } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 
@@ -19,7 +19,7 @@ function normalizeQuestion(q: string): string {
  * Busca uma resposta no Knowledge Base persistente
  */
 export async function findInCopilotKnowledgeBase(tenantCatalog: string, question: string) {
-   
+  const db = await getDb();
   if (!db) return null;
   
   const normalized = normalizeQuestion(question);
@@ -69,7 +69,7 @@ export async function saveToCopilotKnowledgeBase(data: {
   questionType: "structural" | "operational";
   answerPromptTemplate?: string;
 }) {
-   
+  const db = await getDb();
   if (!db) return;
   
   const expiresAt = new Date();
@@ -93,7 +93,7 @@ export async function saveToCopilotKnowledgeBase(data: {
  * Busca sugestões do Self-Healing no Knowledge Base
  */
 export async function findInSelfHealingKnowledgeBase(tenantCatalog: string, schemaName: string, tableName: string) {
-   
+  const db = await getDb();
   if (!db) return null;
   
   const results = await db.select()
@@ -136,7 +136,7 @@ export async function saveToSelfHealingKnowledgeBase(data: {
   tableName: string;
   suggestions: any;
 }) {
-   
+  const db = await getDb();
   if (!db) return;
   
   const expiresAt = new Date();
@@ -155,7 +155,7 @@ export async function saveToSelfHealingKnowledgeBase(data: {
  * Registra a economia gerada para o painel de FinOps
  */
 async function logCostSavings(tenantCatalog: string, type: "copilot" | "self_healing", amountSaved: number) {
-   
+  const db = await getDb();
   if (!db) return;
   
   const today = new Date().toISOString().split('T')[0];

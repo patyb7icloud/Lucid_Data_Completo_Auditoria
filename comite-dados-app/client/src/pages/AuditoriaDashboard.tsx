@@ -1,5 +1,5 @@
 import VCLayout from "@/components/VCLayout";
-import LineageGraph, { type LineageEdge } from "@/components/LineageGraph";
+import { DataLineageGraph as LineageGraph } from "@/components/DataLineageGraph";
 import { trpc } from "@/lib/trpc";
 import { useParams, useLocation, Link } from "wouter";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -305,8 +305,7 @@ export default function Dashboard() {
               )}
             </div>
             <LineageGraph
-              edges={(lineageData.lineageEdges ?? []) as LineageEdge[]}
-              className="w-full"
+              data={((lineageData.lineageEdges ?? []) as any[]).map((e: any) => ({ sourceName: e.source, targetName: e.target, type: e.label ?? "direto" }))}
             />
           </div>
         )}

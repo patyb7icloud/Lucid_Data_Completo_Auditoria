@@ -1,5 +1,5 @@
 import VCLayout from "@/components/VCLayout";
-import LineageGraph, { type LineageEdge } from "@/components/LineageGraph";
+import { DataLineageGraph as LineageGraph } from "@/components/DataLineageGraph";
 import { trpc } from "@/lib/trpc";
 import { useParams, Link } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -262,7 +262,7 @@ export default function Report() {
                           </Badge>
                         )}
                       </div>
-                      <LineageGraph edges={lineageEdges} className="w-full" />
+                      <LineageGraph data={lineageEdges.map((e: any) => ({ sourceName: e.source, targetName: e.target, type: e.label ?? "direto" }))} />
                     </div>
                   )}
                 </TabsContent>

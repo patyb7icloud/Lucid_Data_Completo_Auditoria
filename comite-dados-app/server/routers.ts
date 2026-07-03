@@ -1,4 +1,4 @@
-import { auditoriaRouter } from "./auditoria/api/auditoriaRouter";
+import { appRouter as auditoriaRouter } from "./auditoria/api/auditoriaRouter";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import { COOKIE_NAME } from "@shared/const";

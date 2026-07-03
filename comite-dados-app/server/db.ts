@@ -3105,3 +3105,52 @@ export async function getTierSyncHistory(domainId?: number, limit = 50): Promise
   }
   return q.orderBy(desc(tierSyncLog.syncedAt)).limit(limit);
 }
+
+// ─── Auditoria Helper Functions ──────────────────────────────────────────────
+import { auditSessions, analysisResults } from "./db-auditoria";
+
+export async function createAuditSession(data: any) {
+  const dbConn = await getDb();
+  if (!dbConn) throw new Error("DB not available");
+  const [row] = await dbConn.insert(auditSessions).values(data).returning();
+  return row.id;
+}
+
+export async function updateAuditSession(id: number, data: any) {
+  const dbConn = await getDb();
+  if (!dbConn) throw new Error("DB not available");
+  await dbConn.update(auditSessions).set({ ...data, updatedAt: new Date() }).where(eq(auditSessions.id, id));
+}
+
+export async function getAuditSession(id: number) {
+  const dbConn = await getDb();
+  if (!dbConn) return null;
+  const [row] = await dbConn.select().from(auditSessions).where(eq(auditSessions.id, id)).limit(1);
+  return row ?? null;
+}
+
+export async function getAuditSessionsByUser(userId: number) {
+  const dbConn = await getDb();
+  if (!dbConn) return [];
+  return dbConn.select().from(auditSessions).where(eq(auditSessions.userId, userId)).orderBy(desc(auditSessions.createdAt));
+}
+
+export async function createAnalysisResult(data: any) {
+  const dbConn = await getDb();
+  if (!dbConn) throw new Error("DB not available");
+  const [row] = await dbConn.insert(analysisResults).values(data).returning();
+  return row.id;
+}
+
+export async function updateAnalysisResult(id: number, data: any) {
+  const dbConn = await getDb();
+  if (!dbConn) throw new Error("DB not available");
+  await dbConn.update(analysisResults).set({ ...data, updatedAt: new Date() }).where(eq(analysisResults.id, id));
+}
+
+export async function getAnalysisResultsBySession(sessionId: number) {
+  const dbConn = await getDb();
+  if (!dbConn) return [];
+  return dbConn.select().from(analysisResults).where(eq(analysisResults.sessionId, sessionId)).orderBy(analysisResults.id);
+}
+

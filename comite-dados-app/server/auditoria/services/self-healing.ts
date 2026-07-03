@@ -111,19 +111,17 @@ export async function generateSelfHealingSuggestions(
       suggestedTags: tableTags,
       confidenceScore: 0.95,
       reasoning: result.reasoning,
-      sqlCommand: `COMMENT ON TABLE ${config.catalog}.${schema}.${tableName} IS '${result.tableDescription.replace(/'/g, "''")}';
-` +
-                  tableTags.map((tag: string) => `ALTER TABLE ${config.catalog}.${schema}.${tableName} SET TAGS ('${tag}' = 'true');`).join('
-')
+      sqlCommand: [
+        `COMMENT ON TABLE ${config.catalog}.${schema}.${tableName} IS '${result.tableDescription.replace(/'/g, "''")}';`,
+        ...tableTags.map((tag: string) => `ALTER TABLE ${config.catalog}.${schema}.${tableName} SET TAGS ('${tag}' = 'true');`)
+      ].join('\n')
     });
 
     // Sugestões para as colunas
     for (const col of result.columns) {
       let sql = `COMMENT ON COLUMN ${config.catalog}.${schema}.${tableName}.${col.name} IS '${col.description.replace(/'/g, "''")}';`;
       if (col.tags && col.tags.length > 0) {
-        sql += '
-' + col.tags.map((tag: string) => `ALTER TABLE ${config.catalog}.${schema}.${tableName} ALTER COLUMN ${col.name} SET TAGS ('${tag}' = 'true');`).join('
-');
+        sql += '\n' + col.tags.map((tag: string) => `ALTER TABLE ${config.catalog}.${schema}.${tableName} ALTER COLUMN ${col.name} SET TAGS ('${tag}' = 'true');`).join('\n');
       }
 
       suggestions.push({
@@ -164,8 +162,7 @@ export async function applySelfHealing(
     let count = 0;
     for (const cmd of sqlCommands) {
       // O Databricks SQL Statement API executa um comando por vez. 
-      // Se houver múltiplos comandos na string (separados por 
-), precisamos dividir.
+      // Se houver múltiplos comandos na string (separados por \n), precisamos dividir.
       const individualCommands = cmd.split(';').filter(c => c.trim().length > 0);
       for (const singleCmd of individualCommands) {
         await executeStatement(config, singleCmd.trim());
