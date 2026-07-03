@@ -1,0 +1,26 @@
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mc:/export_comite_dados/comite_dados_app_codigo/comite-dados-app[39m
+
+ [32m✓[39m server/intake.test.ts [2m([22m[2m10 tests[22m[2m)[22m[90m 24[2mms[22m[39m
+ [32m✓[39m server/_core/logger.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 35[2mms[22m[39m
+ [31m❯[39m server/export.test.ts [2m([22m[2m47 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 12914[2mms[22m[39m
+[31m   [31m×[31m Export Service — Funções de exportação[2m > [22mdeve retornar erro quando reunião não é encontrada para PDF[33m 6601[2mms[22m[31m[39m
+[31m     → Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".[39m
+   [33m[2m✓[22m[39m Export Service — Funções de exportação[2m > [22mdeve retornar erro quando reunião não é encontrada para DOCX [33m6179[2mms[22m[39m
+ [32m✓[39m server/system.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 18[2mms[22m[39m
+ [32m✓[39m server/auth.logout.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 16[2mms[22m[39m
+ [32m✓[39m server/comite.test.ts [2m([22m[2m9 tests[22m[2m)[22m[90m 207[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[1m[7m Failed Tests 1 [27m[22m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[31m[1m[7m FAIL [27m[22m[39m server/export.test.ts[2m > [22mExport Service — Funções de exportação[2m > [22mdeve retornar erro quando reunião não é encontrada para PDF
+[31m[1mError[22m: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".[39m
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m5 passed[39m[22m[90m (6)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m69 passed[39m[22m[90m (70)[39m
+[2m   Start at [22m 00:06:38
+[2m   Duration [22m 21.61s[2m (transform 3.56s, setup 0ms, collect 57.84s, tests 13.21s, environment 4ms, prepare 6.02s)[22m
+

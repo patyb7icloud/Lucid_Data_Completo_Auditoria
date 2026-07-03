@@ -1,0 +1,237 @@
+# =============================================================================
+# Comitê de Dados — Docker Compose
+# Sobe a aplicação + PostgreSQL + Caddy (proxy reverso com HTTPS automático).
+#
+# Uso rápido:
+#   1. Copie env.example.txt para .env e preencha os valores
+#   2. Defina APP_DOMAIN no .env com o domínio real (ex: comite-dados.vc.com.br)
+#   3. Garanta que o domínio aponta para o IP do servidor (DNS A record)
+#   4. docker compose up -d
+#   5. Acesse https://<APP_DOMAIN>
+#
+# Para ambiente local sem domínio:
+#   - Deixe APP_DOMAIN em branco ou use "localhost"
+#   - Caddy usará certificado autoassinado (tls internal)
+# =============================================================================
+
+services:
+
+  # ─── Banco de dados PostgreSQL ───────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: comite_dados_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-senha_segura}
+      POSTGRES_USER: comite_user
+      POSTGRES_DB: comite_dados
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      # Expõe apenas localmente para não abrir o banco para a internet
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U comite_user -d comite_dados"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - comite_net
+
+  # ─── Migration — executa drizzle-kit push antes do app subir ─────────────
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    container_name: comite_dados_migrate
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["sh", "-c", "pnpm drizzle-kit push"]
+    environment:
+      DATABASE_URL: postgresql://comite_user:${DB_PASSWORD:-senha_segura}@db:5432/comite_dados
+    networks:
+      - comite_net
+
+  # ─── Aplicação Node.js ────────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: comite_dados_app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+
+      # URL pública da aplicação (usada em links de e-mail, reset de senha, etc.)
+      APP_PUBLIC_URL: https://${APP_DOMAIN:-localhost}
+
+      # Banco de dados — aponta para o serviço "db" acima
+      DATABASE_URL: postgresql://comite_user:${DB_PASSWORD:-senha_segura}@db:5432/comite_dados
+
+      # Autenticação JWT
+      JWT_SECRET: ${JWT_SECRET}
+
+      # Microsoft Entra ID (opcional — SSO corporativo)
+      ENTRA_CLIENT_ID: ${ENTRA_CLIENT_ID:-}
+      ENTRA_CLIENT_SECRET: ${ENTRA_CLIENT_SECRET:-}
+      ENTRA_TENANT_ID: ${ENTRA_TENANT_ID:-}
+
+      # LLM — configure o provedor desejado
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_KEY: ${AZURE_OPENAI_KEY:-}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-gpt-4o}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2024-02-01}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+
+      # Armazenamento de arquivos
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-local}
+      LOCAL_STORAGE_PATH: /var/comite-dados/uploads
+      LOCAL_STORAGE_PUBLIC_URL: ${LOCAL_STORAGE_PUBLIC_URL:-https://${APP_DOMAIN:-localhost}/uploads}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-}
+      AWS_S3_ENDPOINT: ${AWS_S3_ENDPOINT:-}
+      AWS_S3_PUBLIC_URL: ${AWS_S3_PUBLIC_URL:-}
+      AZURE_STORAGE_CONNECTION_STRING: ${AZURE_STORAGE_CONNECTION_STRING:-}
+      AZURE_STORAGE_CONTAINER: ${AZURE_STORAGE_CONTAINER:-comite-dados}
+
+      # SMTP — e-mail transacional (convites, recuperação de senha)
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Comitê de Dados VC}
+
+      # Microsoft Teams (opcional)
+      TEAMS_TENANT_ID: ${TEAMS_TENANT_ID:-}
+      TEAMS_CLIENT_ID: ${TEAMS_CLIENT_ID:-}
+      TEAMS_CLIENT_SECRET: ${TEAMS_CLIENT_SECRET:-}
+      TEAMS_USER_ID: ${TEAMS_USER_ID:-}
+
+      # ServiceNow (opcional)
+      SERVICENOW_INSTANCE_URL: ${SERVICENOW_INSTANCE_URL:-}
+      SERVICENOW_USERNAME: ${SERVICENOW_USERNAME:-}
+      SERVICENOW_PASSWORD: ${SERVICENOW_PASSWORD:-}
+
+      # App
+      VITE_APP_TITLE: ${VITE_APP_TITLE:-Comitê de Dados — Votorantim Cimentos}
+      OWNER_OPEN_ID: ${OWNER_OPEN_ID:-}
+      OWNER_NAME: ${OWNER_NAME:-}
+
+    volumes:
+      # Persistência dos uploads locais
+      - uploads_data:/var/comite-dados/uploads
+    # A porta 3000 NÃO é exposta diretamente — o Caddy faz o proxy
+    expose:
+      - "3000"
+    networks:
+      - comite_net
+
+  # ─── Caddy — Proxy Reverso com HTTPS Automático ───────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    container_name: comite_dados_caddy
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      # HTTP (redirecionado automaticamente para HTTPS pelo Caddy)
+      - "80:80"
+      # HTTPS com certificado SSL automático via Let's Encrypt
+      - "443:443"
+    environment:
+      # Domínio público da aplicação (ex: comite-dados.votorantimcimentos.com.br)
+      APP_DOMAIN: ${APP_DOMAIN:-localhost}
+    volumes:
+      # Configuração do Caddy
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Dados persistentes: certificados SSL, ACME challenges
+      - caddy_data:/data
+      # Configuração gerada automaticamente pelo Caddy
+      - caddy_config:/config
+      # Logs de acesso
+      - caddy_logs:/var/log/caddy
+    networks:
+      - comite_net
+
+  # ─── Redis (opcional — rate limit persistente em multi-instância) ──────────
+  # Habilite este bloco e configure REDIS_URL=redis://redis:6379 no serviço app
+  # para que os contadores de rate-limit sobrevivam a reinicializações e
+  # funcionem corretamente com múltiplas réplicas.
+  # Requer: pnpm add ioredis
+  #
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: comite_dados_redis
+  #   restart: unless-stopped
+  #   command: redis-server --appendonly yes --maxmemory 64mb --maxmemory-policy allkeys-lru
+  #   volumes:
+  #     - redis_data:/data
+  #   expose:
+  #     - "6379"
+  #   networks:
+  #     - comite_net
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 3
+
+  # ─── Ollama (opcional — LLM self-hosted) ──────────────────────────────────
+  # Descomente este bloco para usar Ollama localmente.
+  # Requer GPU NVIDIA ou execução em CPU (mais lento).
+  #
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: comite_dados_ollama
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   expose:
+  #     - "11434"
+  #   networks:
+  #     - comite_net
+  #   # Para GPU NVIDIA, adicione:
+  #   # deploy:
+  #   #   resources:
+  #   #     reservations:
+  #   #       devices:
+  #   #         - driver: nvidia
+  #   #           count: 1
+  #   #           capabilities: [gpu]
+
+volumes:
+  db_data:
+    driver: local
+  uploads_data:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
+    driver: local
+  caddy_logs:
+    driver: local
+  # ollama_data:
+  #   driver: local
+  # redis_data:
+  #   driver: local
+
+networks:
+  comite_net:
+    driver: bridge

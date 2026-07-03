@@ -1,0 +1,25 @@
+-- Data Contracts table
+CREATE TABLE IF NOT EXISTS `data_contracts` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `name` varchar(256) NOT NULL,
+  `assetId` int NOT NULL,
+  `producerTeam` varchar(256) NOT NULL,
+  `consumerTeam` varchar(256) NOT NULL,
+  `description` text,
+  `slaLevel` text,
+  `schemaJson` json,
+  `deliveryFrequency` varchar(128),
+  `version` varchar(32) DEFAULT '1.0.0',
+  `status` enum('rascunho','em_revisao','ativo','expirado','cancelado') NOT NULL DEFAULT 'rascunho',
+  `signedAt` timestamp NULL,
+  `expiresAt` timestamp NULL,
+  `createdById` int,
+  `createdByName` varchar(256),
+  `approvedById` int,
+  `approvedByName` varchar(256),
+  `changeNotes` text,
+  `createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updatedAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `data_contracts_assetId_idx` (`assetId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

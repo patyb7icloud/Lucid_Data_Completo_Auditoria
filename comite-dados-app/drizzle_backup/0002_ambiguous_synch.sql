@@ -1,0 +1,1 @@
+ALTER TABLE `domains` ADD `responsible` varchar(256);

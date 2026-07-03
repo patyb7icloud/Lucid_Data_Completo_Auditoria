@@ -1,0 +1,75 @@
+# ─── Caddyfile — Comitê de Dados ─────────────────────────────────────────────
+#
+# Caddy obtém e renova certificados SSL automaticamente via Let's Encrypt.
+# Substitua {$APP_DOMAIN} pela variável de ambiente ou pelo domínio real.
+#
+# Exemplos de domínio:
+#   comite-dados.votorantimcimentos.com.br
+#   dados.votorantimcimentos.com.br
+#
+# Para usar IP local (sem domínio), substitua o bloco por:
+#   :443 {
+#     tls internal
+#     reverse_proxy app:3000
+#   }
+# ─────────────────────────────────────────────────────────────────────────────
+
+{$APP_DOMAIN:localhost} {
+
+  # ── Compressão ──────────────────────────────────────────────────────────────
+  encode gzip zstd
+
+  # ── Cabeçalhos de segurança ──────────────────────────────────────────────────
+  header {
+    # Impede clickjacking
+    X-Frame-Options "SAMEORIGIN"
+    # Impede MIME sniffing
+    X-Content-Type-Options "nosniff"
+    # Força HTTPS por 1 ano
+    Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    # Política de referência
+    Referrer-Policy "strict-origin-when-cross-origin"
+    # Remove identificação do servidor
+    -Server
+  }
+
+  # ── Rate Limiting ────────────────────────────────────────────────────────────
+  # NOTA: A diretiva rate_limit não faz parte do Caddy oficial.
+  # O controle de brute-force é realizado no nível da aplicação (localAuth.ts).
+  # Para rate limiting no proxy, use o plugin caddy-ratelimit:
+  #   https://github.com/mholt/caddy-ratelimit
+  # ou configure via docker-compose usando a imagem caddy com o plugin incluído.
+
+  # ── Proxy reverso para a aplicação Node.js ───────────────────────────────────
+  reverse_proxy app:3000 {
+    # Repassa o IP real do cliente
+    header_up X-Real-IP {remote_host}
+    header_up X-Forwarded-For {remote_host}
+    header_up X-Forwarded-Proto {scheme}
+    header_up Host {host}
+
+    # Health check
+    health_uri /api/health
+    health_interval 30s
+    health_timeout 5s
+
+    # Timeout para uploads e operações longas
+    transport http {
+      read_timeout  120s
+      write_timeout 120s
+    }
+  }
+
+  # ── Logs ─────────────────────────────────────────────────────────────────────
+  log {
+    output file /var/log/caddy/access.log {
+      roll_size 50mb
+      roll_keep 5
+    }
+    format json
+    level INFO
+  }
+}
+
+# ── Redireciona HTTP → HTTPS automaticamente ─────────────────────────────────
+# (Caddy faz isso automaticamente quando um domínio real é usado)
