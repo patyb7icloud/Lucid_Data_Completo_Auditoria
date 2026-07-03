@@ -2,6 +2,7 @@ import VCLayout from "@/components/VCLayout";
 import { DataLineageGraph as LineageGraph } from "@/components/DataLineageGraph";
 import { trpc } from "@/lib/trpc";
 import { useParams, useLocation, Link } from "wouter";
+import { useEffect } from "react";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { getTranslation } from "@shared/i18n/translations";
 import { Button } from "@/components/ui/button";
@@ -72,6 +73,12 @@ export default function Dashboard() {
   const t = getTranslation(language);
   const sessionId = parseInt(params.sessionId ?? "0");
 
+  useEffect(() => {
+    if (!sessionId) {
+      navigate("/auditoria/history");
+    }
+  }, [sessionId, navigate]);
+
   const ANALYSIS_META = [
     { type: "structure", label: t.dashboard.structureAnalysis, icon: Database, color: "text-info" },
     { type: "glossary", label: t.dashboard.glossaryAnalysis, icon: FileText, color: "text-success" },
@@ -87,28 +94,24 @@ export default function Dashboard() {
 
   if (isLoading) {
     return (
-      <VCLayout>
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="text-center space-y-4">
-            <div className="w-12 h-12 rounded-full border-2 border-primary border-t-transparent animate-spin mx-auto" />
-            <p className="text-muted-foreground">{language === 'pt' ? 'Carregando resultados...' : 'Loading results...'}</p>
-          </div>
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center space-y-4">
+          <div className="w-12 h-12 rounded-full border-2 border-primary border-t-transparent animate-spin mx-auto" />
+          <p className="text-muted-foreground">{language === 'pt' ? 'Carregando resultados...' : 'Loading results...'}</p>
         </div>
-      </VCLayout>
+      </div>
     );
   }
 
   if (error || !data) {
     return (
-      <VCLayout>
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="text-center space-y-4">
-            <XCircle className="w-12 h-12 text-destructive mx-auto" />
-            <p className="text-foreground font-semibold">{language === 'pt' ? 'Sessão não encontrada' : 'Session not found'}</p>
-            <Button asChild variant="outline"><Link href="/history">{t.home.viewHistory}</Link></Button>
-          </div>
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center space-y-4">
+          <XCircle className="w-12 h-12 text-destructive mx-auto" />
+          <p className="text-foreground font-semibold">{language === 'pt' ? 'Sessão não encontrada' : 'Session not found'}</p>
+          <Button asChild variant="outline"><Link href="/history">{t.home.viewHistory}</Link></Button>
         </div>
-      </VCLayout>
+      </div>
     );
   }
 
@@ -134,10 +137,9 @@ export default function Dashboard() {
   const securityData = getAnalysisData("security")?.resultData as any;
 
   return (
-    <VCLayout>
-      <div className="min-h-screen p-8 space-y-8">
-        {/* SecOps Alert (Real-time) */}
-        <SecOpsPanel />
+    <div className="p-4 md:p-8 space-y-8">
+      {/* SecOps Alert (Real-time) */}
+      <SecOpsPanel />
 
         {/* Header */}
         <div className="flex items-start justify-between animate-fade-in-up">
@@ -448,6 +450,5 @@ export default function Dashboard() {
           </Button>
         </div>
       </div>
-    </VCLayout>
   );
 }

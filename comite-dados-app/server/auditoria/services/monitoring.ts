@@ -1,18 +1,18 @@
 import { eq, and, gte, lte, desc } from "drizzle-orm";
-import { db } from "../../db";
+import { getDb } from "../../db";
 import * as auditoriaSchema from "../../db-auditoria";
 import {
   copilotKnowledgeBase,
   aiWeeklyMetrics,
   aiCostSavingsLog,
-} from "../drizzle/schema";
+} from "../../db-auditoria";
 
 /**
  * Agrega as métricas da última semana e salva no banco de dados.
  * Retorna os dados agregados.
  */
 export async function generateWeeklyMetrics(tenantCatalog: string) {
-   
+  const db = await getDb();
   if (!db) throw new Error("Database not available");
 
   const now = new Date();
@@ -114,7 +114,7 @@ export async function generateWeeklyMetrics(tenantCatalog: string) {
  * Busca a métrica semanal mais recente para exibir no painel.
  */
 export async function getLatestWeeklyMetrics(tenantCatalog: string) {
-   
+  const db = await getDb();
   if (!db) return null;
 
   const [latest] = await db

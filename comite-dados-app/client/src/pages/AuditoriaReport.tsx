@@ -131,9 +131,8 @@ export default function Report() {
   const score = Math.round(data.metadata.governanceScore ?? 0);
 
   return (
-    <VCLayout>
-      <div className="min-h-screen p-8 space-y-8">
-        {/* Header */}
+    <div className="p-4 md:p-8 space-y-8">
+      {/* Header */}
         <div className="flex items-start justify-between animate-fade-in-up">
           <div>
             <Button asChild variant="ghost" size="sm" className="mb-3 text-muted-foreground hover:text-foreground -ml-2">
@@ -271,7 +270,6 @@ export default function Report() {
           </Tabs>
         </div>
       </div>
-    </VCLayout>
   );
 }
 

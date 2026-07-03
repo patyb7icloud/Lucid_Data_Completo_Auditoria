@@ -5,7 +5,11 @@ export default function Audit() {
   const params = useParams<{ sessionId: string }>();
   const [, navigate] = useLocation();
   useEffect(() => {
-    if (params.sessionId) navigate(`/dashboard/${params.sessionId}`);
-  }, [params.sessionId]);
+    if (params.sessionId) {
+      navigate(`/auditoria/report/${params.sessionId}`);
+    } else {
+      navigate("/auditoria/connect");
+    }
+  }, [params.sessionId, navigate]);
   return null;
 }

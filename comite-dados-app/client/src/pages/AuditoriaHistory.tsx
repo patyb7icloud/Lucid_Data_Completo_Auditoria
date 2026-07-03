@@ -460,33 +460,30 @@ export default function History() {
   };
 
   return (
-    <VCLayout>
-      <div className="min-h-screen p-8 space-y-8">
+    <div className="p-4 md:p-8 space-y-8">
 
-        {/* Header */}
-        <div className="flex items-center justify-between animate-fade-in-up flex-wrap gap-4">
-          <div>
-            <h1 className="font-display text-3xl font-bold text-foreground">Histórico de Auditorias</h1>
-            <p className="text-muted-foreground mt-1 text-sm">Evolução do score de governança ao longo do tempo</p>
-          </div>
-          <div className="flex items-center gap-3">
-            {completedSessions.length >= 2 && !compareMode && (
-              <Button variant="outline" onClick={() => { setCompareMode(true); setShowComparison(false); setSelectedIds([]); }}
-                className="border-border hover:border-gold/40 h-10 text-sm gap-2">
-                <GitCompare className="w-4 h-4" />Comparar Auditorias
-              </Button>
-            )}
-            {compareMode && (
-              <Button variant="outline" onClick={() => { setCompareMode(false); setSelectedIds([]); setShowComparison(false); }}
-                className="border-border hover:border-gold/40 h-10 text-sm gap-2 text-muted-foreground">
-                <X className="w-4 h-4" />Cancelar
-              </Button>
-            )}
-            <Button asChild className="gradient-gold text-white font-semibold h-10">
-              <Link href="/connect"><Plus className="w-4 h-4 mr-2" />Nova Auditoria</Link>
-            </Button>
-          </div>
-        </div>
+      {/* Header */}
+      <div className="flex items-center justify-between animate-fade-in-up flex-wrap gap-4">
+        <h1 className="font-display text-3xl font-bold text-foreground">Histórico de Auditorias</h1>
+        <p className="text-muted-foreground mt-1 text-sm">Evolução do score de governança ao longo do tempo</p>
+      </div>
+      <div className="flex items-center gap-3">
+        {completedSessions.length >= 2 && !compareMode && (
+          <Button variant="outline" onClick={() => { setCompareMode(true); setShowComparison(false); setSelectedIds([]); }}
+            className="border-border hover:border-gold/40 h-10 text-sm gap-2">
+            <GitCompare className="w-4 h-4" />Comparar Auditorias
+          </Button>
+        )}
+        {compareMode && (
+          <Button variant="outline" onClick={() => { setCompareMode(false); setSelectedIds([]); setShowComparison(false); }}
+            className="border-border hover:border-gold/40 h-10 text-sm gap-2 text-muted-foreground">
+            <X className="w-4 h-4" />Cancelar
+          </Button>
+        )}
+        <Button asChild className="gradient-gold text-white font-semibold h-10">
+          <Link href="/auditoria/connect"><Plus className="w-4 h-4 mr-2" />Nova Auditoria</Link>
+        </Button>
+      </div>
 
         {isLoading ? (
           <div className="flex items-center justify-center py-20">
@@ -782,7 +779,6 @@ export default function History() {
             </div>
           </>
         )}
-      </div>
-    </VCLayout>
+    </div>
   );
 }

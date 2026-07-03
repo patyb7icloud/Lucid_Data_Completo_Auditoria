@@ -201,7 +201,7 @@ export default function VCLayout({ children }: VCLayoutProps) {
               <div key={group.labelKey} className="space-y-1">
                 <p className="px-3 text-[10px] font-bold text-white/30 uppercase tracking-widest mb-2">{t(group.labelKey)}</p>
                 {filteredItems.map(({ href, icon: Icon, labelKey }) => {
-                  const isActive = location === href || (href !== '/' && location.startsWith(href));
+                  const isActive = location === href || (href !== '/' && href !== '/auditoria' && location.startsWith(href));
                   return (
                     <Link key={href} href={href}>
                       <div
