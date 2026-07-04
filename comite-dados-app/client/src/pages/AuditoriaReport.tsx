@@ -136,7 +136,7 @@ export default function Report() {
         <div className="flex items-start justify-between animate-fade-in-up">
           <div>
             <Button asChild variant="ghost" size="sm" className="mb-3 text-muted-foreground hover:text-foreground -ml-2">
-              <Link href={`/dashboard/${sessionId}`}>
+              <Link href="/">
                 <ArrowLeft className="w-4 h-4 mr-1.5" />Voltar ao Dashboard
               </Link>
             </Button>

@@ -4,9 +4,12 @@
  * Lê todos os .sql em ./drizzle, divide por --> statement-breakpoint e executa.
  * Uso: node run-migrations.js
  */
-const { Client } = require("pg");
-const fs = require("fs");
-const path = require("path");
+import 'dotenv/config';
+import { fileURLToPath } from "url";
+import fs from "fs";
+import path from "path";
+import { Client } from "pg";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function main() {
   const url = process.env.DATABASE_URL;

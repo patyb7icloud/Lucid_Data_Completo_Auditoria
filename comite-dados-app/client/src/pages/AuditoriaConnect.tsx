@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { Shield, CheckCircle2, XCircle, Loader2, Eye, EyeOff, Info, Zap, ArrowRight } from "lucide-react";
@@ -18,7 +18,7 @@ export default function Connect() {
   const [testStatus, setTestStatus] = useState<"idle" | "testing" | "ok" | "error">("idle");
   const [testMessage, setTestMessage] = useState("");
 
-  useState(() => {
+  useEffect(() => {
     try {
       const stored = localStorage.getItem("databricks_config");
       if (stored) {
@@ -30,7 +30,7 @@ export default function Connect() {
     } catch (e) {
       console.error(e);
     }
-  });
+  }, []);
 
   const testConn = trpc.auditoria.databricks.testConnection.useMutation({
     onMutate: () => setTestStatus("testing"),
