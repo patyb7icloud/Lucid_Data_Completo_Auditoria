@@ -26,7 +26,13 @@ export async function executeStatement(
   sql: string,
   warehouseId?: string
 ): Promise<{ columns: string[]; rows: Record<string, string | null>[] }> {
-  const baseUrl = config.host.replace(/\/$/, "");
+  let hostClean = config.host.trim().replace(/\/$/, "");
+  hostClean = hostClean.replace(/^(https?:\/\/)+/, "https://");
+  hostClean = hostClean.replace(/^https?\/\//, "https://");
+  if (!hostClean.startsWith("http://") && !hostClean.startsWith("https://")) {
+    hostClean = "https://" + hostClean;
+  }
+  const baseUrl = hostClean;
 
   // First, discover a warehouse if not provided
   let wId = warehouseId;
@@ -112,19 +118,38 @@ export async function executeStatement(
 
 export async function testConnection(config: DatabricksConfig): Promise<{ ok: boolean; message: string; warehouseId?: string }> {
   try {
-    const baseUrl = config.host.replace(/\/$/, "");
+    let hostClean = config.host.trim().replace(/\/$/, "");
+    // Corrigir erros de digitação como https://https// ou https//
+    hostClean = hostClean.replace(/^(https?:\/\/)+/, "https://");
+    hostClean = hostClean.replace(/^https?\/\//, "https://");
+    if (!hostClean.startsWith("http://") && !hostClean.startsWith("https://")) {
+      hostClean = "https://" + hostClean;
+    }
+    const baseUrl = hostClean;
+    
     const res = await fetch(`${baseUrl}/api/2.0/sql/warehouses`, {
-      headers: { Authorization: `Bearer ${config.token}` },
+      headers: { 
+        Authorization: `Bearer ${config.token}`,
+        "Content-Type": "application/json"
+      }
     });
-    if (!res.ok) return { ok: false, message: `Authentication failed (HTTP ${res.status})` };
+
+    if (!res.ok) {
+      const errText = await res.text();
+      return { ok: false, message: `Falha na autenticação (HTTP ${res.status}): ${errText}` };
+    }
+
     const data = await res.json();
     const warehouses = data.warehouses ?? [];
-    if (warehouses.length === 0) return { ok: false, message: "No SQL warehouses found in this workspace" };
+    if (warehouses.length === 0) {
+      return { ok: false, message: "Nenhum SQL Warehouse encontrado neste workspace do Databricks" };
+    }
+
     const running = warehouses.find((w: any) => w.state === "RUNNING");
     const wh = running ?? warehouses[0];
-    return { ok: true, message: `Connected successfully. Using warehouse: ${wh.name}`, warehouseId: wh.id };
+    return { ok: true, message: `Conectado com sucesso. Usando warehouse: ${wh.name}`, warehouseId: wh.id };
   } catch (e: any) {
-    return { ok: false, message: e.message ?? "Connection failed" };
+    return { ok: false, message: `Erro de conexão: ${e.message ?? e}` };
   }
 }
 

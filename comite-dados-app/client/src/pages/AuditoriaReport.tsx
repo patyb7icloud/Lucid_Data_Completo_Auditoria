@@ -67,7 +67,7 @@ export default function Report() {
   const params = useParams<{ sessionId: string }>();
   const sessionId = parseInt(params.sessionId ?? "0");
 
-  const { data, isLoading, error } = trpc.databricks.exportReport.useQuery(
+  const { data, isLoading, error } = trpc.auditoria.databricks.exportReport.useQuery(
     { sessionId },
     { enabled: !!sessionId }
   );

@@ -166,7 +166,7 @@ function CatalogSelector({ catalogs, selected, onChange }: {
 function ComparisonTable({ sessionIdA, sessionIdB, onClose }: {
   sessionIdA: number; sessionIdB: number; onClose: () => void;
 }) {
-  const { data, isLoading } = trpc.databricks.compareSessions.useQuery(
+  const { data, isLoading } = trpc.auditoria.databricks.compareSessions.useQuery(
     { sessionIdA, sessionIdB },
     { enabled: true }
   );
@@ -381,7 +381,7 @@ function ComparisonTable({ sessionIdA, sessionIdB, onClose }: {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function History() {
-  const { data: sessions, isLoading } = trpc.databricks.listSessions.useQuery();
+  const { data: sessions, isLoading } = trpc.auditoria.databricks.listSessions.useQuery();
   const [selectedCatalog, setSelectedCatalog] = useState<string>("__all__");
   const [compareMode, setCompareMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -764,8 +764,12 @@ export default function History() {
                           </div>
                           {isCompleted && !compareMode && (
                             <Button asChild size="sm" variant="outline"
-                              className="border-border hover:border-gold/40 h-8 text-xs">
-                              <Link href={`/dashboard/${session.id}`}>
+                              className="border-border hover:border-gold/40 h-8 text-xs"
+                              onClick={() => {
+                                localStorage.setItem('last_audit_session_id', String(session.id));
+                              }}
+                            >
+                              <Link href={`/auditoria/report/${session.id}`}>
                                 Ver Dashboard <ArrowRight className="w-3 h-3 ml-1.5" />
                               </Link>
                             </Button>

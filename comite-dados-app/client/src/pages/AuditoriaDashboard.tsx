@@ -75,7 +75,14 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!sessionId) {
-      navigate("/auditoria/history");
+      // Tentar pegar a última sessão executada salva no localStorage
+      const storedConfig = localStorage.getItem("databricks_config");
+      const lastSessionId = localStorage.getItem("last_audit_session_id");
+      if (lastSessionId) {
+        navigate(`/auditoria/report/${lastSessionId}`);
+      } else {
+        navigate("/auditoria/history");
+      }
     }
   }, [sessionId, navigate]);
 
@@ -89,7 +96,7 @@ export default function Dashboard() {
   ];
 
   const queryKey = { sessionId };
-  const hook = import.meta.env.DEV ? trpc.databricks.getSessionPublic : trpc.databricks.getSession;
+  const hook = import.meta.env.DEV ? trpc.auditoria.databricks.getSessionPublic : trpc.auditoria.databricks.getSession;
   const { data, isLoading, error } = hook.useQuery(queryKey, { enabled: !!sessionId, refetchInterval: false });
 
   if (isLoading) {

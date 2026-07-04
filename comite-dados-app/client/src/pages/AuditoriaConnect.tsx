@@ -18,18 +18,40 @@ export default function Connect() {
   const [testStatus, setTestStatus] = useState<"idle" | "testing" | "ok" | "error">("idle");
   const [testMessage, setTestMessage] = useState("");
 
-  const testConn = trpc.databricks.testConnection.useMutation({
+  useState(() => {
+    try {
+      const stored = localStorage.getItem("databricks_config");
+      if (stored) {
+        const config = JSON.parse(stored);
+        if (config.host) setHost(config.host);
+        if (config.token) setToken(config.token);
+        if (config.catalog) setCatalog(config.catalog);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  });
+
+  const testConn = trpc.auditoria.databricks.testConnection.useMutation({
     onMutate: () => setTestStatus("testing"),
     onSuccess: (data) => {
       if (data.ok) {
         setTestStatus("ok");
         setTestMessage(data.message);
-        // Save configuration to localStorage for later use
+        
+        let cleanHost = host.trim();
+        cleanHost = cleanHost.replace(/^(https?:\/\/)+/, "https://");
+        cleanHost = cleanHost.replace(/^https?\/\//, "https://");
+        if (!cleanHost.startsWith("http://") && !cleanHost.startsWith("https://")) {
+          cleanHost = "https://" + cleanHost;
+        }
+
         localStorage.setItem('databricks_config', JSON.stringify({
-          host: host.trim(),
+          host: cleanHost,
           token: token.trim(),
           catalog: catalog.trim(),
         }));
+        setHost(cleanHost);
         toast.success("Conexão estabelecida com sucesso!");
       } else {
         setTestStatus("error");
@@ -44,7 +66,7 @@ export default function Connect() {
     },
   });
 
-  const startAudit = trpc.databricks.startAudit.useMutation({
+  const startAudit = trpc.auditoria.databricks.startAudit.useMutation({
     onSuccess: (data) => {
       // Save configuration to localStorage
       localStorage.setItem('databricks_config', JSON.stringify({
@@ -52,8 +74,9 @@ export default function Connect() {
         token: token.trim(),
         catalog: catalog.trim(),
       }));
+      localStorage.setItem('last_audit_session_id', String(data.sessionId));
       toast.success("Auditoria concluída!");
-      navigate(`/dashboard/${data.sessionId}`);
+      navigate(`/auditoria/report/${data.sessionId}`);
     },
     onError: (e) => {
       toast.error("Erro ao executar auditoria: " + e.message);
@@ -68,15 +91,12 @@ export default function Connect() {
     testConn.mutate({ host: host.trim(), token: token.trim(), catalog: catalog.trim() });
   };
 
-  const handleStart = () => {
+  const handleStart = async () => {
     if (!host || !token || !catalog) {
       toast.error("Preencha todos os campos");
       return;
     }
-    if (testStatus !== "ok") {
-      toast.error("Teste a conexão antes de iniciar a auditoria");
-      return;
-    }
+    // Se o usuário não testou previamente ou mudou os campos, realizar uma pré-conexão ou simplesmente disparar a auditoria diretamente
     startAudit.mutate({ host: host.trim(), token: token.trim(), catalog: catalog.trim() });
   };
 
