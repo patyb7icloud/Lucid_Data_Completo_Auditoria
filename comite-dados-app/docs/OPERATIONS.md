@@ -3,7 +3,7 @@
 ## Health checks
 
 - Endpoint HTTP público: /api/health
-- Endpoint Prometheus: /api/prometheus
+- Endpoint Prometheus: /api/metrics
 - OpenAPI: /api/v1/openapi.json
 
 ## Smoke test
@@ -22,7 +22,7 @@ O smoke test sobe o servidor em modo produção, valida /api/health, valida a Op
 Pré-requisitos:
 
 - DATABASE_URL configurada
-- mysqldump disponível no PATH ou em MYSQLDUMP_BIN
+- pg_dump disponível no PATH (pacote postgresql-client)
 
 Execução:
 
@@ -46,17 +46,16 @@ Para automatizar o backup diário em um servidor Linux:
 Variáveis opcionais:
 
 - BACKUP_DIR: diretório de saída dos dumps
-- MYSQLDUMP_BIN: caminho explícito do binário mysqldump
 
 ## Restore básico
 
 ```bash
-mysql -h <host> -P <porta> -u <usuario> -p <database> < arquivo.sql
+psql -h <host> -p <porta> -U <usuario> -d <database> -f arquivo.sql
 ```
 
 ## Rotina mínima recomendada
 
 - Build + smoke a cada merge
-- Backup diário do MySQL
+- Backup diário do PostgreSQL
 - Teste de restore pelo menos uma vez por sprint
-- Monitorar /api/health e /api/prometheus
+- Monitorar /api/health e /api/metrics

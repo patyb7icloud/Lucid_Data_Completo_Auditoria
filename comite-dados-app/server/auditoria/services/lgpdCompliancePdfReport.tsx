@@ -546,8 +546,8 @@ export function LGPDCompliancePdfPage({
               {
                 borderTopWidth: 1,
                 borderTopColor: DARK3,
-                paddingTopWidth: 8,
-                marginTopWidth: 8,
+                paddingTop: 8,
+                marginTop: 8,
               },
             ]}
           >

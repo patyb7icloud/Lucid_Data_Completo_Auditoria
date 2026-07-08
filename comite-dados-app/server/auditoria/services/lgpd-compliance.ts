@@ -3,7 +3,7 @@
  * Analyzes and reports on LGPD/GDPR compliance for data assets
  */
 
-import { DatabricksConfig } from "./databricks";
+import { DatabricksConfig } from "../databricks";
 
 export interface LGPDAnalysis {
   summary: {

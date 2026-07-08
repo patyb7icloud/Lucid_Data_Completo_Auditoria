@@ -31,7 +31,19 @@ export class GenericMysqlAdapter implements ISourceAdapter {
   }
 
   private async getPool() {
-    const { createPool } = await import("mysql2/promise");
+    // mysql2 é uma dependência OPCIONAL — usada apenas quando MYSQL_EXTERNAL_URL
+    // está configurada para conectar a fontes de dados MySQL externas.
+    // O banco principal da aplicação é PostgreSQL. Para habilitar este adaptador:
+    //   pnpm add mysql2
+    let createPool: any;
+    try {
+      // @ts-ignore — dependência opcional, pode não estar instalada
+      ({ createPool } = await import("mysql2/promise"));
+    } catch {
+      throw new Error(
+        'O pacote "mysql2" não está instalado. Este adaptador conecta a fontes MySQL EXTERNAS (não é o banco da aplicação, que é PostgreSQL). Instale com: pnpm add mysql2'
+      );
+    }
     return createPool({
       uri: this.config.connectionUrl,
       connectTimeout: this.config.queryTimeoutMs ?? 10_000,

@@ -7,6 +7,19 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ---
 
+## [1.2.1] — 2026-07-08 🛠️ Migração Definitiva para PostgreSQL & Preparação para Produção
+
+### Corrigido
+- Removida a dependência `mysql2` do banco principal — a aplicação agora usa exclusivamente PostgreSQL 16 (o pacote `mysql2` passa a ser opcional, apenas para o adaptador de qualidade de fontes MySQL externas)
+- Scripts utilitários (`create-admin.js`, `create-settings-table.js`, `create-tag-policies.cjs`, `promote-admins.js`, `reset-password.js`, `test-full-flow.mjs`) migrados de `mysql2` para `pg` com placeholders `$1..$n` e `DATABASE_URL` obrigatória
+- Removidas credenciais e e-mails hardcoded do `reset-password.js` e `promote-admins.js` (agora parametrizados via variáveis de ambiente)
+- Smoke test corrigido: aceitava apenas status `ok`/`degraded`, mas o endpoint `/api/health` retorna `healthy`/`degraded`
+- Instrumentação OpenTelemetry alterada de `instrumentation-mysql2` para `instrumentation-pg`
+- `env.example.txt`, `README.md`, `docs/OPERATIONS.md` e manual do administrador atualizados para PostgreSQL (`postgresql://...:5432`, `pg_dump`/`psql`)
+- Endpoint de métricas documentado corretamente como `/api/metrics` (antes constava `/api/prometheus`)
+
+---
+
 ## [1.2.0] — 2026-06-09 🤖 Orquestração de Agentes & Drill-down de KPIs
 
 ### Adicionado
@@ -107,7 +120,7 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 - Auto-Discovery de IA usa apenas metadados (nomes de tabelas/colunas), sem tráfego de dados pessoais
 
 ### Infraestrutura
-- Node.js 22 + TypeScript 5.9 + tRPC v11 + Drizzle ORM + MySQL 8
+- Node.js 22 + TypeScript 5.9 + tRPC v11 + Drizzle ORM + PostgreSQL 16
 - React 19 + Vite 7 + Tailwind CSS v4 + Radix UI + Framer Motion + React Flow + Recharts
 - pnpm workspaces, build otimizado com esbuild
 

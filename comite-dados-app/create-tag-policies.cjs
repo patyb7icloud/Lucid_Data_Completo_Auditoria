@@ -1,32 +1,42 @@
-// Script: cria tabela tag_policies e insere políticas LGPD padrão
-const mysql = require('mysql2/promise');
+// Script: cria tabela tag_policies e insere políticas LGPD padrão (PostgreSQL)
+const { Client } = require('pg');
 
 async function run() {
-  const pool = await mysql.createPool({
-    host: '127.0.0.1',
-    port: 3306,
-    user: 'root',
-    database: 'comite_dados',
-    connectionLimit: 1,
-  });
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    console.error("DATABASE_URL is not set");
+    process.exit(1);
+  }
+
+  const client = new Client({ connectionString: url });
+  await client.connect();
 
   try {
-    await pool.query(`
+    // Verifica se o tipo enum existe antes de criar
+    await client.query(`
+      DO $$ BEGIN
+        CREATE TYPE tag_applies_to AS ENUM ('table', 'column', 'both');
+      EXCEPTION
+        WHEN duplicate_object THEN null;
+      END $$;
+    `);
+
+    await client.query(`
       CREATE TABLE IF NOT EXISTS tag_policies (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        tagKey VARCHAR(256) NOT NULL UNIQUE,
-        displayName VARCHAR(256) NOT NULL,
+        id SERIAL PRIMARY KEY,
+        "tagKey" VARCHAR(256) NOT NULL UNIQUE,
+        "displayName" VARCHAR(256) NOT NULL,
         description TEXT,
-        allowedValues TEXT NOT NULL DEFAULT '[]',
-        colorMap TEXT DEFAULT '{}',
-        appliesTo ENUM('table','column','both') NOT NULL DEFAULT 'both',
+        "allowedValues" TEXT NOT NULL DEFAULT '[]',
+        "colorMap" TEXT DEFAULT '{}',
+        "appliesTo" tag_applies_to NOT NULL DEFAULT 'both',
         category VARCHAR(128) DEFAULT 'compliance',
-        isRequired TINYINT(1) DEFAULT 0,
-        autoSync TINYINT(1) DEFAULT 0,
-        sensitivityMapping TEXT DEFAULT '{}',
-        createdById INT,
-        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        "isRequired" SMALLINT DEFAULT 0,
+        "autoSync" SMALLINT DEFAULT 0,
+        "sensitivityMapping" TEXT DEFAULT '{}',
+        "createdById" INT,
+        "createdAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
     console.log('OK: tabela tag_policies criada (ou já existia)');
@@ -95,17 +105,19 @@ async function run() {
     ];
 
     for (const d of defaults) {
-      await pool.query(
-        'INSERT IGNORE INTO tag_policies (tagKey,displayName,description,allowedValues,colorMap,appliesTo,category,isRequired,autoSync,sensitivityMapping) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      await client.query(
+        `INSERT INTO tag_policies ("tagKey","displayName",description,"allowedValues","colorMap","appliesTo",category,"isRequired","autoSync","sensitivityMapping") 
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         ON CONFLICT ("tagKey") DO NOTHING`,
         [d.tagKey, d.displayName, d.description, d.allowedValues, d.colorMap, d.appliesTo, d.category, d.isRequired, d.autoSync, d.sensitivityMapping]
       );
     }
-    console.log('OK: 5 politicas padrao LGPD inseridas (INSERT IGNORE)');
+    console.log('OK: 5 politicas padrao LGPD inseridas (ON CONFLICT DO NOTHING)');
 
-    const [rows] = await pool.query('SELECT id, tagKey, displayName FROM tag_policies ORDER BY id');
+    const { rows } = await client.query('SELECT id, "tagKey", "displayName" FROM tag_policies ORDER BY id');
     console.log('Políticas na tabela:', rows);
   } finally {
-    await pool.end();
+    await client.end();
   }
 }
 

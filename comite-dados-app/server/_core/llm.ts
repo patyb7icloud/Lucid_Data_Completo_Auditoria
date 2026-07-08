@@ -56,6 +56,8 @@ export type ToolChoice =
   | ToolChoiceExplicit;
 
 export type InvokeParams = {
+  /** Modelo específico a usar (opcional). Se omitido, usa o modelo padrão resolvido pela configuração do provedor. */
+  model?: string;
   messages: Message[];
   tools?: Tool[];
   toolChoice?: ToolChoice;
@@ -336,7 +338,8 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   const { model, apiKey } = resolveLLMConfig();
 
   const payload: Record<string, unknown> = {
-    model,
+    // Permite sobrescrever o modelo por chamada (ex.: modelos otimizados por custo)
+    model: params.model ?? model,
     messages: messages.map(normalizeMessage),
   };
 
@@ -352,7 +355,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.tool_choice = normalizedToolChoice;
   }
 
-  payload.max_tokens = 4096
+  payload.max_tokens = params.maxTokens ?? params.max_tokens ?? 4096;
 
   const normalizedResponseFormat = normalizeResponseFormat({
     responseFormat,

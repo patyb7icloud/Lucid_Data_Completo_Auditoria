@@ -32,7 +32,7 @@ export default function LGPDCompliance() {
   const sessionId = location.split('/').pop();
 
   // Fetch compliance analysis data from backend
-  const analyzeComplianceMutation = trpc.lgpd.analyzeCompliance.useMutation();
+  const analyzeComplianceMutation = trpc.auditoria.lgpd.analyzeCompliance.useMutation();
   const { data: complianceAnalysis, isPending: isLoadingAnalysis } = analyzeComplianceMutation;
   
   // Get stored Databricks config from session or localStorage
@@ -79,7 +79,7 @@ export default function LGPDCompliance() {
         riskLevel: complianceAnalysis.summary.riskLevel,
         criticalIssues: complianceAnalysis.summary.criticalIssues,
         piiColumnsUntagged: complianceAnalysis.piiDetection.untaggedPiiRisk,
-        retentionPolicies: complianceAnalysis.retention.policies.filter((p) => p.assessment === 'defined').length,
+        retentionPolicies: complianceAnalysis.retention.policies.filter((p: { assessment: string }) => p.assessment === 'defined').length,
         encryptedTables: complianceAnalysis.encryption.encryptedTables,
         auditLogsEnabled: complianceAnalysis.audit.accessLogsEnabled,
         dsrReadiness: {

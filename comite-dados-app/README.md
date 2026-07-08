@@ -10,7 +10,7 @@ Plataforma enterprise de governança de dados: catálogo, dicionário, linhagem,
 |---|---|
 | Node.js | 22 |
 | pnpm | 10 |
-| MySQL | 8.0 |
+| PostgreSQL | 16 |
 | Docker + Compose | 24 (opcional, para produção) |
 
 ---
@@ -56,7 +56,7 @@ Acesse a aplicação com as credenciais exibidas e troque a senha no primeiro lo
 cp env.example.txt .env
 # Edite APP_DOMAIN, DATABASE_URL, JWT_SECRET e demais variáveis
 
-# 2. Suba a stack completa (MySQL + App + Caddy com SSL automático)
+# 2. Suba a stack completa (PostgreSQL + App + Caddy com SSL automático)
 docker compose up -d --build
 
 # 3. Execute as migrações na primeira execução
@@ -74,7 +74,7 @@ O Caddy obtém e renova certificados SSL automaticamente via Let's Encrypt.
 
 | Variável | Descrição |
 |---|---|
-| `DATABASE_URL` | Conexão MySQL: `mysql://user:pass@host:3306/db` |
+| `DATABASE_URL` | Conexão PostgreSQL: `postgresql://user:pass@host:5432/db` |
 | `JWT_SECRET` | Chave secreta para tokens JWT (mínimo 32 chars) |
 | `NODE_ENV` | `development` ou `production` |
 | `APP_DOMAIN` | Domínio público (usado pelo Caddy para SSL) |
@@ -97,7 +97,7 @@ pnpm start        # Inicia o build de produção
 pnpm check        # Typecheck TypeScript (sem emitir arquivos)
 pnpm test         # Executa os testes unitários (Vitest)
 pnpm run smoke    # Smoke test do build de produção
-pnpm run backup:db # Backup completo do banco (mysqldump)
+pnpm run backup:db # Backup completo do banco (pg_dump)
 pnpm run seed     # Popula o banco com dados de demonstração
 ```
 
@@ -109,7 +109,7 @@ pnpm run seed     # Popula o banco com dados de demonstração
 client/          React 19 + Vite 7 + Tailwind CSS 4
 server/          Node.js + Express + tRPC 11 + Drizzle ORM
 shared/          Tipos e constantes compartilhados
-drizzle/         Migrações e schema do banco (MySQL 8)
+drizzle/         Migrações e schema do banco (PostgreSQL 16)
 scripts/         Utilitários (backup, seed, smoke test)
 docs/            Runbooks operacionais
 ```
@@ -151,7 +151,7 @@ pnpm run backup:db
 # Arquivo gerado em ./backups/comite_dados-<timestamp>.sql
 
 # Restore
-mysql -h <host> -P <porta> -u <usuario> -p <database> < arquivo.sql
+psql -h <host> -p <porta> -U <usuario> -d <database> -f arquivo.sql
 ```
 
 Consulte [`docs/OPERATIONS.md`](docs/OPERATIONS.md) para rotinas operacionais completas.

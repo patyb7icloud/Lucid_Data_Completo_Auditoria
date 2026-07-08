@@ -1520,7 +1520,7 @@ export async function generateAdminManualPDF(): Promise<Buffer> {
       content: [
         "Docker 20.10+ e Docker Compose v2+",
         "Domínio público com registro DNS (para certificado SSL automático via Let's Encrypt)",
-        "MySQL 8.0+ (provisionado automaticamente via Docker Compose)",
+        "PostgreSQL 16+ (provisionado automaticamente via Docker Compose)",
         "Variável de ambiente DATABASE_URL configurada",
         "JWT_SECRET com valor aleatório de ao menos 32 caracteres",
         "Opcional: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET para SSO via Google",
@@ -1536,7 +1536,7 @@ export async function generateAdminManualPDF(): Promise<Buffer> {
         "3. Execute: docker compose up -d",
         "4. Aguarde o health check (30 segundos) e acesse https://SEU_DOMINIO",
         "5. Crie o primeiro usuário (será automaticamente definido como Administrador).",
-        "IMPORTANTE: Não exponha a porta 3307 (MySQL) para a internet. O Caddy gerencia o SSL automaticamente.",
+        "IMPORTANTE: Não exponha a porta 5432 (PostgreSQL) para a internet. O Caddy gerencia o SSL automaticamente.",
       ],
     },
     {
@@ -1551,7 +1551,7 @@ export async function generateAdminManualPDF(): Promise<Buffer> {
     {
       title: "5. Motor de Qualidade",
       content: [
-        "O Motor de Qualidade executa verificações reais nos dados via Adaptadores (MySQL, SAP HANA, Portal Nativo).",
+        "O Motor de Qualidade executa verificações reais nos dados via Adaptadores (PostgreSQL, MySQL externo, SAP HANA, Databricks, Portal Nativo).",
         "Métricas suportadas: Completude (% de valores não nulos), Unicidade (% de valores únicos), Regex (validação por padrão).",
         "Configuração: acesse Qualidade → Regras e defina o limiar (threshold) para cada ativo.",
         "Agendamento automático: o scheduler executa scans a cada 6 horas. Configure QUALITY_CRON_EXPRESSION no .env para alterar.",
@@ -1591,18 +1591,18 @@ export async function generateAdminManualPDF(): Promise<Buffer> {
     {
       title: "9. Backup e Recuperação",
       content: [
-        "Execute npm run backup:db para gerar um dump MySQL com timestamp.",
+        "Execute npm run backup:db para gerar um dump PostgreSQL (pg_dump) com timestamp.",
         "Os arquivos de backup são salvos em ./backups/ por padrão (configure BACKUP_DIR no .env).",
         "Automatize o backup diário com cron: 0 3 * * * cd /caminho/projeto && node scripts/backup-db.mjs",
-        "Para restaurar: mysql -u comite_user -p comite_dados < ./backups/comite_dados_YYYY-MM-DD.sql",
-        "Volumes Docker: os dados do MySQL são persistidos em db_data. Faça backup também do volume Docker em ambientes críticos.",
+        "Para restaurar: psql -U comite_user -d comite_dados -f ./backups/comite_dados_YYYY-MM-DD.sql",
+        "Volumes Docker: os dados do PostgreSQL são persistidos em db_data. Faça backup também do volume Docker em ambientes críticos.",
       ],
     },
     {
       title: "10. Monitoramento e Observabilidade",
       content: [
         "Health Check: GET /api/health — retorna status, latência do banco e uptime.",
-        "Métricas Prometheus: GET /api/prometheus — integre com Grafana para dashboards de infraestrutura.",
+        "Métricas Prometheus: GET /api/metrics — integre com Grafana para dashboards de infraestrutura.",
         "Log de Auditoria: todas as ações de usuários e da IA são registradas com timestamp, IP e entidade modificada.",
         "Smoke Test pós-deploy: npm run smoke — valida health, OpenAPI e graceful shutdown.",
         "Testes E2E: npm run test:e2e — executa a suíte Playwright contra a instância local (requer app rodando).",

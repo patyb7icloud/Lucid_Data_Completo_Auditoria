@@ -96,8 +96,12 @@ export default function Dashboard() {
   ];
 
   const queryKey = { sessionId };
-  const hook = import.meta.env.DEV ? trpc.auditoria.databricks.getSessionPublic : trpc.auditoria.databricks.getSession;
-  const { data, isLoading, error } = hook.useQuery(queryKey, { enabled: !!sessionId, refetchInterval: false });
+  // Nota: os dois hooks são sempre chamados para respeitar as Rules of Hooks do React;
+  // apenas um deles é habilitado conforme o ambiente (dev usa a rota pública).
+  const isDev = import.meta.env.DEV;
+  const publicQuery = trpc.auditoria.databricks.getSessionPublic.useQuery(queryKey, { enabled: !!sessionId && isDev, refetchInterval: false });
+  const privateQuery = trpc.auditoria.databricks.getSession.useQuery(queryKey, { enabled: !!sessionId && !isDev, refetchInterval: false });
+  const { data, isLoading, error } = isDev ? publicQuery : privateQuery;
 
   if (isLoading) {
     return (
@@ -110,7 +114,7 @@ export default function Dashboard() {
     );
   }
 
-  if (error || !data) {
+  if (error || !data || !data.session) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center space-y-4">
@@ -125,11 +129,11 @@ export default function Dashboard() {
   const { session, analyses } = data;
   const score = Math.round(session.governanceScore ?? 0);
 
-  const getAnalysisData = (type: string) => analyses.find((a) => a.analysisType === type);
+  const getAnalysisData = (type: string) => analyses.find((a: { analysisType: string }) => a.analysisType === type);
 
   const allRecs: string[] = [];
   const allGaps: string[] = [];
-  analyses.forEach((a) => {
+  analyses.forEach((a: { recommendations: unknown; gaps: unknown }) => {
     if (Array.isArray(a.recommendations)) allRecs.push(...(a.recommendations as string[]));
     if (Array.isArray(a.gaps)) allGaps.push(...(a.gaps as string[]));
   });

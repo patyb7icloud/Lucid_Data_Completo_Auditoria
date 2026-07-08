@@ -2818,7 +2818,7 @@ export async function createWorkflowStepAction(data: InsertWorkflowStepAction) {
 export async function getMyWorkflowTasks(actorOpenId: string) {
   const db = await getDb();
   if (!db) return [];
-  // Busca instâncias pending e filtra no JS (JSON não é indexável no MySQL facilmente)
+  // Busca instâncias pending e filtra no JS (os aprovadores do step atual ficam em JSON)
   const instances = await db.select().from(workflowInstances)
     .where(eq(workflowInstances.status, "pending"))
     .orderBy(desc(workflowInstances.startedAt));

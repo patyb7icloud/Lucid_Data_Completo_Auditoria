@@ -7,9 +7,11 @@ import { MessageSquare, Sparkles } from "lucide-react";
 interface CopilotChatProps {
   host: string;
   catalog: string;
+  /** Token de acesso Databricks (PAT). Opcional; quando ausente, o backend usa a sessão ativa. */
+  token?: string;
 }
 
-export function CopilotChat({ host, catalog }: CopilotChatProps) {
+export function CopilotChat({ host, catalog, token }: CopilotChatProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "system",
@@ -17,7 +19,7 @@ export function CopilotChat({ host, catalog }: CopilotChatProps) {
     },
   ]);
 
-  const askMutation = trpc.copilot.ask.useMutation();
+  const askMutation = trpc.auditoria.copilot.ask.useMutation();
 
   const handleSendMessage = async (content: string) => {
     const userMsg: Message = { role: "user", content };
@@ -27,6 +29,7 @@ export function CopilotChat({ host, catalog }: CopilotChatProps) {
     try {
       const response = await askMutation.mutateAsync({
         host,
+        token: token ?? "",
         catalog,
         question: content,
       });
@@ -35,7 +38,7 @@ export function CopilotChat({ host, catalog }: CopilotChatProps) {
         ...prev,
         {
           role: "assistant",
-          content: response,
+          content: response.answer,
         },
       ]);
     } catch (error: any) {

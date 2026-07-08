@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch server/_core/index.ts",
     "build": "vite build && esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
-    "start": "node dist/server/_core/index.js",
+    "start": "node dist/index.js",
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
@@ -81,7 +81,6 @@
     "jose": "6.1.0",
     "ldapjs": "^3.0.7",
     "lucide-react": "^0.453.0",
-    "mysql2": "^3.15.1",
     "nanoid": "^5.1.5",
     "next-themes": "^0.4.6",
     "nodemailer": "^8.0.5",

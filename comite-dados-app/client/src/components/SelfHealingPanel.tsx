@@ -15,8 +15,8 @@ export function SelfHealingPanel({ schema, tableName }: SelfHealingPanelProps) {
   const [analysis, setAnalysis] = useState<any>(null);
   const [isApplying, setIsApplying] = useState(false);
 
-  const analyzeMutation = trpc.selfHealing.analyzeTable.useMutation();
-  const applyMutation = trpc.selfHealing.applyFixes.useMutation();
+  const analyzeMutation = trpc.auditoria.selfHealing.analyzeTable.useMutation();
+  const applyMutation = trpc.auditoria.selfHealing.applyFixes.useMutation();
 
   // Usar credenciais mockadas de Databricks para a simulação/execução do painel
   const handleAnalyze = async () => {

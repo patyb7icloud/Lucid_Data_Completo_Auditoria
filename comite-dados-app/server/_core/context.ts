@@ -20,9 +20,13 @@ export async function createContext(
     user = null;
   }
 
+  // SEGURANÇA: nunca expor o hash de senha nas respostas da API (ex.: auth.me).
+  // O objeto é clonado com passwordHash nulo antes de entrar no contexto tRPC.
+  const safeUser: User | null = user ? { ...user, passwordHash: null } : null;
+
   return {
     req: opts.req,
     res: opts.res,
-    user,
+    user: safeUser,
   };
 }

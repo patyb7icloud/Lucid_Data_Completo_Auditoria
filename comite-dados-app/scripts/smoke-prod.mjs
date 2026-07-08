@@ -25,7 +25,7 @@ async function waitForServer(url, timeoutMs = 30000) {
 }
 
 async function main() {
-  const child = spawn(nodeBin, ["dist/server/_core/index.js"], {
+  const child = spawn(nodeBin, ["dist/index.js"], {
     env: {
       ...process.env,
       NODE_ENV: "production",
@@ -48,7 +48,7 @@ async function main() {
   try {
     const healthResponse = await waitForServer(`${baseUrl}/api/health`);
     const health = await healthResponse.json();
-    if (!["ok", "degraded"].includes(health.status)) {
+    if (!["ok", "healthy", "degraded"].includes(health.status)) {
       throw new Error(`Unexpected health status: ${health.status}`);
     }
 

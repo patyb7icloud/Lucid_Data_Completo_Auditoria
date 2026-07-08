@@ -239,7 +239,7 @@ export default function Report() {
               const rows = flattenToRows(analysis.data);
               const isLineage = type === "lineage";
               const lineageEdges = isLineage
-                ? (((analysis.data as any)?.lineageEdges ?? []) as LineageEdge[])
+                ? (((analysis.data as any)?.lineageEdges ?? []) as Array<{ source: string; target: string; label?: string }>)
                 : [];
               return (
                 <TabsContent key={type} value={type}>

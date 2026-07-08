@@ -6,7 +6,8 @@ dotenv.config();
 
 // Garante DATABASE_URL
 if (!process.env.DATABASE_URL) {
-  process.env.DATABASE_URL = "mysql://root@127.0.0.1:3306/comite_dados";
+  console.error("DATABASE_URL is not set (esperado: postgresql://user:pass@host:5432/comite_dados)");
+  process.exit(1);
 }
 
 import { createDataQualityCheck, getDb } from "./server/db";

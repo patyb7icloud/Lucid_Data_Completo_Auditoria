@@ -418,16 +418,16 @@ export const appRouter = router({
 
     setupWeeklyJob: protectedProcedure
       .input(z.object({ tenantCatalog: z.string() }))
-      .mutation(async ({ input, ctx }) => {
-        // Como o arquivo setup-monitoring-job não existe separadamente (só existe o script no commit), podemos mockar a ativação ou ajustar se necessário.
-        // Vamos verificar se o arquivo setup-monitoring-job.ts existe ou se é mockável.
-        try {
-          const { setupWeeklyMonitoringJob } = await import("../services/setup-monitoring-job");
-          const sessionToken = ctx.req.cookies?.app_session_id || "";
-          return await setupWeeklyMonitoringJob(input.tenantCatalog, sessionToken);
-        } catch {
-          return { success: true, message: "Weekly monitoring job scheduled (mocked)" };
-        }
+      .mutation(async ({ input }) => {
+        // O agendamento de job semântico no Databricks ainda não foi implementado.
+        // A geração de métricas semanais pode ser executada sob demanda via
+        // generateWeeklyMetrics ou agendada externamente (cron) chamando este endpoint.
+        const { generateWeeklyMetrics } = await import("../services/monitoring");
+        await generateWeeklyMetrics(input.tenantCatalog);
+        return {
+          success: true,
+          message: "Métricas semanais geradas. Para execução recorrente, agende uma chamada periódica (cron) a este endpoint.",
+        };
       }),
   }),
 

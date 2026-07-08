@@ -13,13 +13,13 @@ interface MonitoringPanelProps {
 export function MonitoringPanel({ tenantCatalog }: MonitoringPanelProps) {
   const [metrics, setMetrics] = useState<any>(null);
 
-  const getWeeklyMetricsQuery = trpc.monitoring.getWeeklyMetrics.useQuery(
+  const getWeeklyMetricsQuery = trpc.auditoria.monitoring.getWeeklyMetrics.useQuery(
     { tenantCatalog },
     { enabled: !!tenantCatalog }
   );
 
-  const generateWeeklyMetricsMutation = trpc.monitoring.generateWeeklyMetrics.useMutation();
-  const setupWeeklyJobMutation = trpc.monitoring.setupWeeklyJob.useMutation();
+  const generateWeeklyMetricsMutation = trpc.auditoria.monitoring.generateWeeklyMetrics.useMutation();
+  const setupWeeklyJobMutation = trpc.auditoria.monitoring.setupWeeklyJob.useMutation();
 
   const handleGenerate = async () => {
     try {
