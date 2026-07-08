@@ -1,7 +1,7 @@
 import { type Express, type Request, type Response } from "express";
 import React from "react";
 import { renderToStream } from "@react-pdf/renderer";
-import { getAuditSession, getAnalysisResultsBySession } from "./db";
+import { getAuditSession, getAnalysisResultsBySession } from "../../db";
 import { computeGovernanceScore, type GovernanceAnalysisData } from "./databricks";
 import { GovernancePdfDocument, type PdfReportData } from "../services/pdfReport";
 
