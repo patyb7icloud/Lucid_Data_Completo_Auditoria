@@ -57,6 +57,7 @@ import { parseSqlLineage, parseDbtManifest } from "./lineageParser";
 import { mlopsRouter } from "./mlopsRouter";
 import { aiRiskRouter } from "./aiRiskRouter";
 import { biConnectorsRouter } from "./biConnectorsRouter";
+import { hubRouter } from "./hubRouter";
 
 // ─── Domains Router ───────────────────────────────────────────────────────────
 const domainsRouter = router({
@@ -3893,6 +3894,7 @@ export const appRouter = router({
   aiRisk: aiRiskRouter,
   biConnectors: biConnectorsRouter,
   auditoria: auditoriaRouter,
+  hub: hubRouter,
 });
 export type AppRouter = typeof appRouter;
 

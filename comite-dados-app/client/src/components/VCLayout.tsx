@@ -10,7 +10,7 @@ import {
   ChevronRight, Bell, History, UserCog, Settings2, MessageSquare,
   Library, BookText, Network, ShieldCheck, Lock, HelpCircle, ClipboardCheck,
   BookOpen, ShieldAlert, TrendingUp, Gauge, Zap, Globe, FileText, UserCheck, Activity, Store, Inbox, Tag, Shield, Layers, Plug,
-  BrainCircuit, AlertTriangle, PlugZap
+  BrainCircuit, AlertTriangle, PlugZap, BarChart2
 } from "lucide-react";
 import { useI18n } from "@/contexts/I18nContext";
 import { LOCALES, type Locale } from "@/lib/i18n";
@@ -78,7 +78,14 @@ const navGroups = [
       { href: "/bi-conectores", icon: PlugZap, labelKey: "nav.biConnectors" },
     ]
   },
-    {
+  {
+    // HUB AI & Data (Nexa Playbook)
+    labelKey: "nav.group.hub",
+    items: [
+      { href: "/hub", icon: BarChart2, labelKey: "nav.hubDashboard" },
+    ]
+  },
+  {
     // Auditoria & Compliance (Integrado)
     labelKey: "nav.group.auditoria",
     items: [

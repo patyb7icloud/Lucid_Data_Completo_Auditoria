@@ -1260,3 +1260,113 @@ export const biSyncLogs = pgTable("bi_sync_logs", {
   finishedAt:    timestamp("finished_at"),
 });
 export type BiSyncLog = typeof biSyncLogs.$inferSelect;
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HUB AI & Data (Nexa Playbook): Gates G0-G4, Business Case, Artefatos
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const gateNameEnum     = pgEnum("gate_name",      ["G0", "G1", "G2", "G3", "G4"]);
+export const gateDecisionEnum = pgEnum("gate_decision",  ["go", "no_go", "pendente"]);
+export const artifactTypeEnum = pgEnum("artifact_type",  ["ficha_hipotese","business_case","risk_assessment","checklist_arquitetura","checklist_compliance","status_report","uat_doc","gmud","handover","knowledge_transfer","outro"]);
+export const lifecyclePhaseEnum = pgEnum("lifecycle_phase", ["descoberta_problema","descoberta_hipoteses","avaliacao_hipotese","poc","desenvolvimento_testes","uat","habilitacao_operacional","hypercare","lancamento_operacional","sustentacao"]);
+
+// ─── HUB: Histórico de Gates (G0-G4) por demanda ─────────────────────────────
+export const intakeGatesHistory = pgTable("intake_gates_history", {
+  id:           serial("id").primaryKey(),
+  intakeId:     integer("intake_id").notNull(),
+  gateName:     gateNameEnum("gate_name").notNull(),
+  decision:     gateDecisionEnum("decision").notNull().default("pendente"),
+  criteriaMet:  jsonb("criteria_met").$type<{
+    impactosRiscos?: boolean;
+    potencialFinanceiro?: boolean;
+    viabilidadeOperacional?: boolean;
+    viabilidadeTecnica?: boolean;
+  }>(),
+  approvedById: integer("approved_by_id"),
+  approvedByName: varchar("approved_by_name", { length: 256 }),
+  decidedAt:    timestamp("decided_at"),
+  comments:     text("comments"),
+  createdAt:    timestamp("created_at").defaultNow().notNull(),
+});
+export type IntakeGateHistory = typeof intakeGatesHistory.$inferSelect;
+export type InsertIntakeGateHistory = typeof intakeGatesHistory.$inferInsert;
+
+// ─── HUB: Fase do ciclo de vida por demanda ───────────────────────────────────
+export const intakeLifecycle = pgTable("intake_lifecycle", {
+  id:          serial("id").primaryKey(),
+  intakeId:    integer("intake_id").notNull().unique(),
+  phase:       lifecyclePhaseEnum("phase").notNull().default("descoberta_problema"),
+  phaseHistory: jsonb("phase_history").$type<Array<{
+    phase: string; enteredAt: string; exitedAt?: string; changedBy?: string;
+  }>>().default([]),
+  hypercareStartedAt: timestamp("hypercare_started_at"),
+  hypercareExitCriteria: jsonb("hypercare_exit_criteria").$type<Array<{
+    criterion: string; met: boolean; verifiedAt?: string;
+  }>>(),
+  updatedAt:   timestamp("updated_at").defaultNow().notNull(),
+});
+export type IntakeLifecycle = typeof intakeLifecycle.$inferSelect;
+export type InsertIntakeLifecycle = typeof intakeLifecycle.$inferInsert;
+
+// ─── HUB: Business Case (Calculadora ROI / CAPEX / OPEX) ─────────────────────
+export const intakeBusinessCase = pgTable("intake_business_case", {
+  id:                  serial("id").primaryKey(),
+  intakeId:            integer("intake_id").notNull().unique(),
+  // Projeção de Ganhos (Bloco F do template Nexa)
+  reducesFte:          boolean("reduces_fte").default(false),
+  reducesFteValue:     real("reduces_fte_value"),
+  avoidsInfraCosts:    boolean("avoids_infra_costs").default(false),
+  avoidsInfraValue:    real("avoids_infra_value"),
+  avoidsPenalties:     boolean("avoids_penalties").default(false),
+  avoidsPenaltiesValue: real("avoids_penalties_value"),
+  avoidsFutureCosts:   boolean("avoids_future_costs").default(false),
+  avoidsFutureValue:   real("avoids_future_value"),
+  increasesEfficiency: boolean("increases_efficiency").default(false),
+  efficiencyValue:     real("efficiency_value"),
+  intangibleBenefits:  text("intangible_benefits"),
+  // Calculadora CAPEX/OPEX
+  capexTotal:          real("capex_total"),
+  opexMonthly:         real("opex_monthly"),
+  opexAnnual:          real("opex_annual"),
+  estimatedRoiMonths:  integer("estimated_roi_months"),
+  componentsCost:      jsonb("components_cost").$type<Array<{
+    component: string; billingType: string; monthlyVolume: string; unitCost: number; isCapex: boolean;
+  }>>().default([]),
+  // Priorização (framework slide 121)
+  scoreDataReadiness:  smallint("score_data_readiness"),
+  scoreTechReadiness:  smallint("score_tech_readiness"),
+  scoreMaintenance:    smallint("score_maintenance"),
+  scoreOrgReadiness:   smallint("score_org_readiness"),
+  scoreTimeline:       smallint("score_timeline"),
+  scoreStrategicValue: smallint("score_strategic_value"),
+  scoreValueImpact:    smallint("score_value_impact"),
+  scoreReusability:    smallint("score_reusability"),
+  scoreRiskProbability: smallint("score_risk_probability"),
+  scoreSecurity:       smallint("score_security"),
+  scoreRiskImpact:     smallint("score_risk_impact"),
+  createdById:         integer("created_by_id"),
+  createdAt:           timestamp("created_at").defaultNow().notNull(),
+  updatedAt:           timestamp("updated_at").defaultNow().notNull(),
+});
+export type IntakeBusinessCase = typeof intakeBusinessCase.$inferSelect;
+export type InsertIntakeBusinessCase = typeof intakeBusinessCase.$inferInsert;
+
+// ─── HUB: Artefatos obrigatórios por Gate (Risk Assessment, GMUD, etc.) ──────
+export const intakeArtifacts = pgTable("intake_artifacts", {
+  id:            serial("id").primaryKey(),
+  intakeId:      integer("intake_id").notNull(),
+  artifactType:  artifactTypeEnum("artifact_type").notNull(),
+  title:         varchar("title", { length: 512 }).notNull(),
+  fileUrl:       text("file_url"),
+  fileName:      varchar("file_name", { length: 512 }),
+  fileSizeBytes: integer("file_size_bytes"),
+  mimeType:      varchar("mime_type", { length: 128 }),
+  version:       integer("version").default(1).notNull(),
+  notes:         text("notes"),
+  uploadedById:  integer("uploaded_by_id"),
+  uploadedByName: varchar("uploaded_by_name", { length: 256 }),
+  uploadedAt:    timestamp("uploaded_at").defaultNow().notNull(),
+});
+export type IntakeArtifact = typeof intakeArtifacts.$inferSelect;
+export type InsertIntakeArtifact = typeof intakeArtifacts.$inferInsert;

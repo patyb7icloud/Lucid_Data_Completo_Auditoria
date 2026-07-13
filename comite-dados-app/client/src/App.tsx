@@ -69,6 +69,7 @@ import QualidadeSLA from "./pages/QualidadeSLA";
 import GestaoDemandas from "./pages/GestaoDemandas";
 import FilaAprovacoes from "./pages/FilaAprovacoes";
 import IntegracoesConectores from "./pages/IntegracoesConectores";
+import HubDashboard from "./pages/HubDashboard";
 
 function AuthenticatedApp() {
   return (
@@ -128,6 +129,8 @@ function AuthenticatedApp() {
         <Route path="/demandas" component={GestaoDemandas} />
         <Route path="/fila-aprovacoes" component={FilaAprovacoes} />
         <Route path="/integracoes-conectores" component={IntegracoesConectores} />
+        {/* HUB AI & Data — Nexa Playbook */}
+        <Route path="/hub" component={HubDashboard} />
         {/* Lacunas Lucid Data Governance */}
         <Route path="/mlops" component={MLOps} />
         <Route path="/riscos-ia" component={RiscosIA} />
