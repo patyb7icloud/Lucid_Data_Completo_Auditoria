@@ -405,29 +405,24 @@ export const appRouter = router({
     getWeeklyMetrics: protectedProcedure
       .input(z.object({ tenantCatalog: z.string() }))
       .query(async ({ input }) => {
-        const { getLatestWeeklyMetrics } = await import("../services/monitoring");
+        const { getLatestWeeklyMetrics } = await import("./monitoring");
         return await getLatestWeeklyMetrics(input.tenantCatalog);
       }),
 
     generateWeeklyMetrics: protectedProcedure
       .input(z.object({ tenantCatalog: z.string() }))
       .mutation(async ({ input }) => {
-        const { generateWeeklyMetrics } = await import("../services/monitoring");
+        const { generateWeeklyMetrics } = await import("./monitoring");
         return await generateWeeklyMetrics(input.tenantCatalog);
       }),
 
     setupWeeklyJob: protectedProcedure
       .input(z.object({ tenantCatalog: z.string() }))
-      .mutation(async ({ input }) => {
-        // O agendamento de job semântico no Databricks ainda não foi implementado.
-        // A geração de métricas semanais pode ser executada sob demanda via
-        // generateWeeklyMetrics ou agendada externamente (cron) chamando este endpoint.
-        const { generateWeeklyMetrics } = await import("../services/monitoring");
-        await generateWeeklyMetrics(input.tenantCatalog);
-        return {
-          success: true,
-          message: "Métricas semanais geradas. Para execução recorrente, agende uma chamada periódica (cron) a este endpoint.",
-        };
+      .mutation(async ({ input, ctx }) => {
+        const { setupWeeklyMonitoringJob } = await import("./setup-monitoring-job");
+        // Em WebDev, ctx.req.cookies.app_session_id contém a sessão
+        const sessionToken = ctx.req.cookies?.app_session_id || "";
+        return await setupWeeklyMonitoringJob(input.tenantCatalog, sessionToken);
       }),
   }),
 
@@ -472,3 +467,6 @@ export const appRouter = router({
 });
 
 export type AppRouter = typeof appRouter;
+
+// Alias para integração com o routers.ts principal
+export const auditoriaRouter = appRouter;

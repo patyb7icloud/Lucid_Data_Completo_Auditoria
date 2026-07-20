@@ -1,35 +1,40 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import type { Language } from '@shared/i18n/translations';
 
-type Language = "pt" | "en";
-
-interface LanguageContextValue {
+interface LanguageContextType {
   language: Language;
   setLanguage: (lang: Language) => void;
 }
 
-const LanguageContext = createContext<LanguageContextValue>({
-  language: "pt",
-  setLanguage: () => {},
-});
+const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
-export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [language, setLanguage] = useState<Language>(() => {
-    const stored = localStorage.getItem("language");
-    return (stored === "en" || stored === "pt") ? stored : "pt";
-  });
+export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [language, setLanguageState] = useState<Language>('pt');
 
-  const updateLanguage = (lang: Language) => {
-    localStorage.setItem("language", lang);
-    setLanguage(lang);
+  // Load saved language preference on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('language') as Language | null;
+    if (saved && (saved === 'pt' || saved === 'en')) {
+      setLanguageState(saved);
+    }
+  }, []);
+
+  const setLanguage = (lang: Language) => {
+    setLanguageState(lang);
+    localStorage.setItem('language', lang);
   };
 
   return (
-    <LanguageContext.Provider value={{ language, setLanguage: updateLanguage }}>
+    <LanguageContext.Provider value={{ language, setLanguage }}>
       {children}
     </LanguageContext.Provider>
   );
-}
+};
 
-export function useLanguage() {
-  return useContext(LanguageContext);
-}
+export const useLanguage = () => {
+  const context = useContext(LanguageContext);
+  if (!context) {
+    throw new Error('useLanguage must be used within LanguageProvider');
+  }
+  return context;
+};

@@ -48,6 +48,7 @@ import DsarPage from "./pages/DsarPage";
 import StatusPage from "./pages/StatusPage";
 import MarketplacePage from "./pages/MarketplacePage";
 import { BrandProvider } from "./contexts/BrandContext";
+import { LanguageProvider } from "./contexts/LanguageContext";
 import LandingPage from "./pages/LandingPage";
 import SetupWizard from "./pages/SetupWizard";
 import { OnboardingTour } from "./components/OnboardingTour";
@@ -69,7 +70,6 @@ import QualidadeSLA from "./pages/QualidadeSLA";
 import GestaoDemandas from "./pages/GestaoDemandas";
 import FilaAprovacoes from "./pages/FilaAprovacoes";
 import IntegracoesConectores from "./pages/IntegracoesConectores";
-import HubDashboard from "./pages/HubDashboard";
 
 function AuthenticatedApp() {
   return (
@@ -129,8 +129,6 @@ function AuthenticatedApp() {
         <Route path="/demandas" component={GestaoDemandas} />
         <Route path="/fila-aprovacoes" component={FilaAprovacoes} />
         <Route path="/integracoes-conectores" component={IntegracoesConectores} />
-        {/* HUB AI & Data — Nexa Playbook */}
-        <Route path="/hub" component={HubDashboard} />
         {/* Lacunas Lucid Data Governance */}
         <Route path="/mlops" component={MLOps} />
         <Route path="/riscos-ia" component={RiscosIA} />
@@ -148,6 +146,7 @@ function App() {
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <BrandProvider>
+          <LanguageProvider>
           <Toaster />
           <Switch>
             <Route path="/convite/:token" component={InviteResponse} />
@@ -158,6 +157,7 @@ function App() {
             <Route path="/redefinir-senha" component={ResetPassword} />
             <Route component={AuthenticatedApp} />
           </Switch>
+          </LanguageProvider>
           </BrandProvider>
         </TooltipProvider>
       </ThemeProvider>
