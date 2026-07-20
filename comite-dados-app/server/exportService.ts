@@ -237,7 +237,7 @@ function pdfHeader(title: string, subtitle?: string) {
         body: [[
           {
             stack: [
-              { text: "VOTORANTIM CIMENTOS", style: "headerTitle" },
+              { text: "LUCID DATA GOVERNANCE", style: "headerTitle" },
               { text: title, style: "headerSubtitle", margin: [0, 2, 0, 0] },
               ...(subtitle ? [{ text: subtitle, style: "headerSmall", margin: [0, 2, 0, 0] }] : []),
             ],
@@ -1105,7 +1105,7 @@ export async function generateMeetingMinutesDOCX(meetingId: number): Promise<Buf
                         children: [
                           new Paragraph({
                             children: [
-                              new TextRun({ text: "VOTORANTIM CIMENTOS", bold: true, color: "FFFFFF", size: 22 }),
+                              new TextRun({ text: "LUCID DATA GOVERNANCE", bold: true, color: "FFFFFF", size: 22 }),
                             ],
                           }),
                           new Paragraph({

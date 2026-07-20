@@ -19,9 +19,9 @@ CREATE TABLE `organizations` (
   UNIQUE (`slug`)
 );
 
--- Inserir organização padrão (Votorantim Cimentos)
+-- Inserir organização padrão (Lucid Data Governance)
 INSERT INTO `organizations` (`name`, `slug`, `primaryColor`, `secondaryColor`, `plan`, `maxUsers`, `maxAssets`, `defaultLocale`, `timezone`)
-VALUES ('Votorantim Cimentos', 'votorantim', '#1B3A8C', '#6DC23A', 'enterprise', 500, 5000, 'pt-BR', 'America/Sao_Paulo');
+VALUES ('Lucid Data Governance', 'lucid-data', '#1B3A8C', '#6DC23A', 'enterprise', 500, 5000, 'pt-BR', 'America/Sao_Paulo');
 
 -- Adicionar FK de organização na tabela de usuários (multi-tenancy)
 -- Todos os usuários existentes passam a pertencer à organização padrão (ID 1)

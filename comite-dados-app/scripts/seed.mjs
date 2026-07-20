@@ -1,5 +1,5 @@
 /**
- * seed.mjs — Seed inicial da plataforma Comitê de Dados — Votorantim Cimentos
+ * seed.mjs — Seed inicial da plataforma Comitê de Dados — Lucid Data Governance
  *
  * Popula o banco de dados com os dados estruturais do Comitê:
  *   • 7 domínios de dados da VC (idempotente — upsert por nome)
@@ -55,7 +55,7 @@ const DATABASE_URL =
   process.env.DATABASE_URL ||
   "postgresql://comite_user:senha_segura@localhost:5432/comite_dados";
 
-const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || "admin@votorantimcimentos.com.br";
+const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || "admin@lucid-data.com.br";
 const ADMIN_NAME = process.env.SEED_ADMIN_NAME || "Administrador do Sistema";
 const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || "Mudar@123!";
 
@@ -124,7 +124,7 @@ const DOMAINS = [
 const PARTICIPANTS = [
   {
     name: "Ana Paula Ferreira",
-    email: "ana.ferreira@votorantimcimentos.com",
+    email: "ana.ferreira@lucid-data.com",
     jobTitle: "Chief Data Officer",
     department: "Diretoria de Dados e IA",
     phone: "+55 11 3000-0001",
@@ -133,7 +133,7 @@ const PARTICIPANTS = [
   },
   {
     name: "Carlos Eduardo Lima",
-    email: "carlos.lima@votorantimcimentos.com",
+    email: "carlos.lima@lucid-data.com",
     jobTitle: "Gerente de Governança de Dados",
     department: "Tecnologia da Informação",
     phone: "+55 11 3000-0002",
@@ -142,7 +142,7 @@ const PARTICIPANTS = [
   },
   {
     name: "Mariana Costa Souza",
-    email: "mariana.souza@votorantimcimentos.com",
+    email: "mariana.souza@lucid-data.com",
     jobTitle: "Diretora Financeira",
     department: "Controladoria",
     phone: "+55 11 3000-0003",
@@ -151,7 +151,7 @@ const PARTICIPANTS = [
   },
   {
     name: "Roberto Alves Neto",
-    email: "roberto.neto@votorantimcimentos.com",
+    email: "roberto.neto@lucid-data.com",
     jobTitle: "Diretor de RH",
     department: "Recursos Humanos",
     phone: "+55 11 3000-0004",
@@ -160,7 +160,7 @@ const PARTICIPANTS = [
   },
   {
     name: "Fernanda Oliveira",
-    email: "fernanda.oliveira@votorantimcimentos.com",
+    email: "fernanda.oliveira@lucid-data.com",
     jobTitle: "Diretora de Produção",
     department: "Operações Industriais",
     phone: "+55 11 3000-0005",
@@ -169,7 +169,7 @@ const PARTICIPANTS = [
   },
   {
     name: "Thiago Mendes",
-    email: "thiago.mendes@votorantimcimentos.com",
+    email: "thiago.mendes@lucid-data.com",
     jobTitle: "Analista Sênior de Dados Comerciais",
     department: "Comercial",
     phone: "+55 11 3000-0006",
@@ -178,7 +178,7 @@ const PARTICIPANTS = [
   },
   {
     name: "Juliana Ramos",
-    email: "juliana.ramos@votorantimcimentos.com",
+    email: "juliana.ramos@lucid-data.com",
     jobTitle: "Analista de Dados Financeiros",
     department: "Controladoria",
     phone: "+55 11 3000-0007",
@@ -187,7 +187,7 @@ const PARTICIPANTS = [
   },
   {
     name: "Paulo Henrique Santos",
-    email: "paulo.santos@votorantimcimentos.com",
+    email: "paulo.santos@lucid-data.com",
     jobTitle: "Analista de Dados de RH",
     department: "Recursos Humanos",
     phone: "+55 11 3000-0008",
@@ -196,7 +196,7 @@ const PARTICIPANTS = [
   },
   {
     name: "Camila Torres",
-    email: "camila.torres@votorantimcimentos.com",
+    email: "camila.torres@lucid-data.com",
     jobTitle: "Analista de Dados de Logística",
     department: "Logística",
     phone: "+55 11 3000-0009",
@@ -205,7 +205,7 @@ const PARTICIPANTS = [
   },
   {
     name: "Diego Barbosa",
-    email: "diego.barbosa@votorantimcimentos.com",
+    email: "diego.barbosa@lucid-data.com",
     jobTitle: "Analista de Dados de Produção",
     department: "Operações Industriais",
     phone: "+55 11 3000-0010",
@@ -214,7 +214,7 @@ const PARTICIPANTS = [
   },
   {
     name: "Luciana Pinto",
-    email: "luciana.pinto@votorantimcimentos.com",
+    email: "luciana.pinto@lucid-data.com",
     jobTitle: "Arquiteta de Dados",
     department: "Tecnologia da Informação",
     phone: "+55 11 3000-0011",
@@ -223,7 +223,7 @@ const PARTICIPANTS = [
   },
   {
     name: "Rafael Cardoso",
-    email: "rafael.cardoso@votorantimcimentos.com",
+    email: "rafael.cardoso@lucid-data.com",
     jobTitle: "Engenheiro de Dados Sênior",
     department: "Tecnologia da Informação",
     phone: "+55 11 3000-0012",
@@ -232,7 +232,7 @@ const PARTICIPANTS = [
   },
   {
     name: "Patrícia Gomes",
-    email: "patricia.gomes@votorantimcimentos.com",
+    email: "patricia.gomes@lucid-data.com",
     jobTitle: "Especialista em Dados ESG",
     department: "Sustentabilidade",
     phone: "+55 11 3000-0013",
@@ -241,7 +241,7 @@ const PARTICIPANTS = [
   },
   {
     name: "André Luiz Vieira",
-    email: "andre.vieira@votorantimcimentos.com",
+    email: "andre.vieira@lucid-data.com",
     jobTitle: "Gerente Jurídico — LGPD",
     department: "Jurídico",
     phone: "+55 11 3000-0014",
@@ -250,7 +250,7 @@ const PARTICIPANTS = [
   },
   {
     name: "Beatriz Nascimento",
-    email: "beatriz.nascimento@votorantimcimentos.com",
+    email: "beatriz.nascimento@lucid-data.com",
     jobTitle: "Auditora Sênior",
     department: "Auditoria Interna",
     phone: "+55 11 3000-0015",
@@ -259,7 +259,7 @@ const PARTICIPANTS = [
   },
   {
     name: "Gustavo Faria",
-    email: "gustavo.faria@votorantimcimentos.com",
+    email: "gustavo.faria@lucid-data.com",
     jobTitle: "Gerente de Supply Chain",
     department: "Supply Chain",
     phone: "+55 11 3000-0016",
@@ -268,7 +268,7 @@ const PARTICIPANTS = [
   },
   {
     name: "Isabela Monteiro",
-    email: "isabela.monteiro@votorantimcimentos.com",
+    email: "isabela.monteiro@lucid-data.com",
     jobTitle: "Gerente de Sustentabilidade",
     department: "Sustentabilidade",
     phone: "+55 11 3000-0017",
@@ -404,7 +404,7 @@ async function upsertAdmin(conn, { email, name, password }) {
 
 async function main() {
   console.log("╔════════════════════════════════════════════════════════════╗");
-  console.log("║     Seed — Comitê de Dados · Votorantim Cimentos          ║");
+  console.log("║     Seed — Comitê de Dados · Lucid Data Governance          ║");
   console.log("╚════════════════════════════════════════════════════════════╝");
   console.log();
 
@@ -461,7 +461,7 @@ async function main() {
     console.log("  ⚠  ALTERE A SENHA após o primeiro login!");
     console.log();
     console.log("  Variáveis para customizar o admin:");
-    console.log("    SEED_ADMIN_EMAIL    (padrão: admin@votorantimcimentos.com.br)");
+    console.log("    SEED_ADMIN_EMAIL    (padrão: admin@lucid-data.com.br)");
     console.log("    SEED_ADMIN_NAME     (padrão: Administrador do Sistema)");
     console.log("    SEED_ADMIN_PASSWORD (padrão: Mudar@123!)");
     console.log();

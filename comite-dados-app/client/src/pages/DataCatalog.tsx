@@ -540,7 +540,7 @@ export default function DataCatalog() {
               <Label className="text-right col-span-4 text-xs text-muted-foreground font-medium pt-1">Nome Completo no Sistema Origem</Label>
               <Input
                 className="col-span-4 font-mono text-xs"
-                placeholder="catalog.schema.table_name  (ex: votorantim_prod.silver.CLIENTES)"
+                placeholder="catalog.schema.table_name  (ex: lucid_data.silver.CLIENTES)"
                 value={editAsset?.fullyQualifiedName || ""}
                 onChange={(e) => setEditAsset({...editAsset, fullyQualifiedName: e.target.value})}
               />
