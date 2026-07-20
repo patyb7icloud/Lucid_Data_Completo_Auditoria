@@ -2404,7 +2404,7 @@ export async function getLgpdAssets() {
   if (!db) return [];
   return db.select().from(dataAssets)
     .where(sql`(
-      sensitivity IN ('restrito','confidencial','restricted','confidential')
+      sensitivity IN ('restrito','confidencial')
       OR description LIKE '%dado pessoal%'
       OR description LIKE '%dados pessoais%'
       OR description LIKE '%PII%'

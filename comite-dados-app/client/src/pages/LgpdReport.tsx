@@ -11,6 +11,12 @@ import {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const sensitivityConfig: Record<string, { label: string; color: string }> = {
+  // Valores em português (banco de dados)
+  publico:      { label: "Público",       color: "bg-green-100 text-green-800" },
+  interno:      { label: "Interno",       color: "bg-blue-100 text-blue-800" },
+  confidencial: { label: "Confidencial",  color: "bg-orange-100 text-orange-800" },
+  restrito:     { label: "Restrito",      color: "bg-red-100 text-red-800" },
+  // Valores em inglês (compatibilidade legada)
   public:       { label: "Público",       color: "bg-green-100 text-green-800" },
   internal:     { label: "Interno",       color: "bg-blue-100 text-blue-800" },
   confidential: { label: "Confidencial",  color: "bg-orange-100 text-orange-800" },
@@ -18,13 +24,16 @@ const sensitivityConfig: Record<string, { label: string; color: string }> = {
 };
 
 const typeConfig: Record<string, { label: string }> = {
+  tabela:     { label: "Tabela" },
   table:      { label: "Tabela" },
   view:       { label: "View" },
   api:        { label: "API" },
-  report:     { label: "Relatório" },
+  arquivo:    { label: "Arquivo" },
   file:       { label: "Arquivo" },
+  report:     { label: "Relatório" },
   stream:     { label: "Stream" },
   dashboard:  { label: "Dashboard" },
+  outro:      { label: "Outro" },
 };
 
 // ─── CSV Export ───────────────────────────────────────────────────────────────
@@ -48,6 +57,7 @@ function downloadCsv(rows: any[]) {
 // ─── Asset row ────────────────────────────────────────────────────────────────
 function AssetRow({ asset }: { asset: any }) {
   const s = sensitivityConfig[asset.sensitivity] ?? { label: asset.sensitivity, color: "bg-gray-100 text-gray-700" };
+  const isRestricted = asset.sensitivity === "restricted" || asset.sensitivity === "restrito";
   return (
     <tr className="border-b hover:bg-gray-50">
       <td className="px-4 py-3">
@@ -63,7 +73,7 @@ function AssetRow({ asset }: { asset: any }) {
         {asset.updatedAt ? new Date(asset.updatedAt).toLocaleDateString("pt-BR") : "—"}
       </td>
       <td className="px-4 py-3">
-        {asset.sensitivity === "restricted" ? (
+        {isRestricted ? (
           <Lock className="h-4 w-4 text-red-500" />
         ) : (
           <Eye className="h-4 w-4 text-orange-400" />
@@ -81,15 +91,22 @@ export default function LgpdReport() {
   const { data: assets = [], isLoading } = trpc.maturity.lgpdAssets.useQuery();
 
   const filtered = assets.filter((a: any) => {
-    if (filterSensitivity !== "all" && a.sensitivity !== filterSensitivity) return false;
+    if (filterSensitivity !== "all") {
+      // Normalizar para comparação — aceitar pt e en
+      const normFilter = filterSensitivity;
+      const normSens = a.sensitivity;
+      const ptToEn: Record<string, string> = { restrito: "restricted", confidencial: "confidential", interno: "internal", publico: "public" };
+      const enToPt: Record<string, string> = { restricted: "restrito", confidential: "confidencial", internal: "interno", public: "publico" };
+      if (normSens !== normFilter && ptToEn[normSens] !== normFilter && enToPt[normSens] !== normFilter) return false;
+    }
     if (search && !a.name.toLowerCase().includes(search.toLowerCase()) &&
         !(a.description ?? "").toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
 
-  const restricted  = assets.filter((a: any) => a.sensitivity === "restricted").length;
-  const confidential = assets.filter((a: any) => a.sensitivity === "confidential").length;
-  const noOwner     = assets.filter((a: any) => !a.ownerId).length;
+  const restricted   = assets.filter((a: any) => a.sensitivity === "restricted" || a.sensitivity === "restrito").length;
+  const confidential = assets.filter((a: any) => a.sensitivity === "confidential" || a.sensitivity === "confidencial").length;
+  const noOwner      = assets.filter((a: any) => !a.ownerId).length;
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
@@ -214,9 +231,9 @@ export default function LgpdReport() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todas</SelectItem>
-            <SelectItem value="restricted">Restrito</SelectItem>
-            <SelectItem value="confidential">Confidencial</SelectItem>
-            <SelectItem value="internal">Interno</SelectItem>
+            <SelectItem value="restrito">Restrito</SelectItem>
+            <SelectItem value="confidencial">Confidencial</SelectItem>
+            <SelectItem value="interno">Interno</SelectItem>
           </SelectContent>
         </Select>
         <span className="text-sm text-muted-foreground">{filtered.length} ativos</span>
