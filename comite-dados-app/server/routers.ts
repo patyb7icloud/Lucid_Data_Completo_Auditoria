@@ -3196,6 +3196,71 @@ const dsarRouter = router({
       if (ctx.user?.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
       return db.deleteDsarRequest(input.id);
     }),
+
+  // ─── Gargalo 1: Exclusão com Retenção Legal ────────────────────────────────
+  /**
+   * Processa uma solicitação de exclusão DSAR aplicando a lógica de retenção legal.
+   * Retorna relatório: o que pode ser excluído, anonimizado ou retido por lei.
+   * Conforme LGPD Art. 16 — conservação de dados após encerramento do tratamento.
+   */
+  processExclusao: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      const result = await db.processDsarExclusao(input.id);
+      if (ctx.user) {
+        await db.createAuditLog({
+          userId: ctx.user.id,
+          userEmail: ctx.user.email,
+          userName: ctx.user.name,
+          action: "process_exclusao",
+          entity: "dsar_request",
+          entityId: input.id,
+          entityName: `Exclusão DSAR #${input.id}`,
+          details: { summary: result.summary },
+          ipAddress: ctx.req?.ip,
+        });
+      }
+      return result;
+    }),
+
+  // ─── Gargalo 2: Portabilidade — Export JSON do Titular ─────────────────────
+  /**
+   * Gera relatório de portabilidade de dados do titular em formato JSON estruturado.
+   * Consolida todos os ativos sensíveis com base legal, finalidade e medidas de segurança.
+   * Conforme LGPD Art. 18, V — direito à portabilidade dos dados.
+   */
+  generatePortabilityReport: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input, ctx }) => {
+      const report = await db.generateDsarPortabilityReport(input.id);
+      if (ctx.user) {
+        await db.createAuditLog({
+          userId: ctx.user.id,
+          userEmail: ctx.user.email,
+          userName: ctx.user.name,
+          action: "generate_portability_report",
+          entity: "dsar_request",
+          entityId: input.id,
+          entityName: `Portabilidade DSAR #${input.id}`,
+          details: { totalAtivos: report.metadados.totalAtivos },
+          ipAddress: ctx.req?.ip,
+        });
+      }
+      return report;
+    }),
+
+  // ─── Mapa de Retenção Legal (para UI do Data Catalog) ──────────────────────
+  /**
+   * Retorna o mapa completo de retenção legal de todos os ativos.
+   * Usado pela tela de Inventário & RIPD para exibir alertas de bloqueio de exclusão.
+   */
+  getLegalRetentionMap: protectedProcedure
+    .query(() => {
+      return Object.entries(db.LEGAL_RETENTION_MAP).map(([assetName, policy]) => ({
+        assetName,
+        ...policy,
+      }));
+    }),
 });
 
 // ─── Connectors Router (Marketplace) ─────────────────────────────────────────

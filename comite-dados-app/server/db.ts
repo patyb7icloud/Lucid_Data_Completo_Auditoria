@@ -3153,3 +3153,178 @@ export async function getAnalysisResultsBySession(sessionId: number) {
   if (!dbConn) return [];
   return dbConn.select().from(analysisResults).where(eq(analysisResults.sessionId, sessionId));
 }
+
+// ─── DSAR: Mapeamento de Retenção Legal ───────────────────────────────────────
+/**
+ * Tabela estática de retenção legal por ativo.
+ * Define quais campos NÃO podem ser deletados por obrigação legal.
+ * Fonte: LGPD Art. 16, Lei 9.613/98, CLT, Código Tributário Nacional.
+ */
+export const LEGAL_RETENTION_MAP: Record<string, {
+  retentionYears: number;
+  legalBasis: string;
+  blockedColumns: string[];
+  canAnonymize: boolean;
+  canPartialDelete: boolean;
+}> = {
+  KNA1_CUSTOMER_MASTER: {
+    retentionYears: 5,
+    legalBasis: "Código Tributário Nacional (Art. 195) — obrigação fiscal de 5 anos",
+    blockedColumns: ["cpf", "cnpj", "razao_social", "nome_completo", "valor_fatura", "data_transacao"],
+    canAnonymize: true,
+    canPartialDelete: true,
+  },
+  FACT_SALES_DAILY: {
+    retentionYears: 7,
+    legalBasis: "Lei 9.613/98 (COAF) e Código Tributário Nacional — registros financeiros 7 anos",
+    blockedColumns: ["customer_id", "valor_venda", "nota_fiscal", "cnpj_cliente"],
+    canAnonymize: true,
+    canPartialDelete: true,
+  },
+  FACT_FINANCIAL_LEDGER: {
+    retentionYears: 10,
+    legalBasis: "Lei das S.A. (Art. 177) — escrituração contábil 10 anos",
+    blockedColumns: ["conta_contabil", "valor", "documento_fiscal", "cnpj"],
+    canAnonymize: false,
+    canPartialDelete: false,
+  },
+  DIM_EMPLOYEE_MASTER: {
+    retentionYears: 5,
+    legalBasis: "CLT (Art. 11) — prescrição trabalhista 5 anos após rescisão",
+    blockedColumns: ["cpf", "pis_pasep", "ctps", "salario", "cargo", "admissao", "demissao"],
+    canAnonymize: true,
+    canPartialDelete: true,
+  },
+  AGG_MARKETING_FUNNEL: {
+    retentionYears: 2,
+    legalBasis: "LGPD Art. 15 — encerramento do tratamento após finalidade",
+    blockedColumns: [],
+    canAnonymize: false,
+    canPartialDelete: false,
+  },
+};
+
+export function getLegalRetentionPolicy(assetName: string) {
+  const key = Object.keys(LEGAL_RETENTION_MAP).find(
+    k => assetName.toUpperCase().includes(k)
+  );
+  if (!key) return null;
+  return { assetName: key, ...LEGAL_RETENTION_MAP[key] };
+}
+
+export async function processDsarExclusao(dsarId: number) {
+  const dsar = await getDsarRequestById(dsarId);
+  if (!dsar) throw new Error(`DSAR #${dsarId} não encontrado`);
+  const lgpdAssets = await getLgpdAssets();
+  const assetsAnalyzed: Array<{
+    assetName: string;
+    action: "excluido" | "anonimizado" | "retido_por_lei";
+    legalBasis: string | null;
+    retentionYears: number | null;
+    blockedColumns: string[];
+    canAnonymize: boolean;
+    details: string;
+  }> = [];
+  for (const asset of lgpdAssets) {
+    const policy = getLegalRetentionPolicy(asset.name);
+    if (!policy) {
+      assetsAnalyzed.push({
+        assetName: asset.name,
+        action: "excluido",
+        legalBasis: null,
+        retentionYears: null,
+        blockedColumns: [],
+        canAnonymize: false,
+        details: "Sem obrigação legal de retenção. Dados do titular podem ser excluídos integralmente.",
+      });
+    } else if (!policy.canPartialDelete && !policy.canAnonymize) {
+      assetsAnalyzed.push({
+        assetName: asset.name,
+        action: "retido_por_lei",
+        legalBasis: policy.legalBasis,
+        retentionYears: policy.retentionYears,
+        blockedColumns: policy.blockedColumns,
+        canAnonymize: false,
+        details: `Retenção obrigatória por ${policy.retentionYears} anos. Exclusão bloqueada por: ${policy.legalBasis}. Nenhuma ação de exclusão ou anonimização permitida.`,
+      });
+    } else {
+      assetsAnalyzed.push({
+        assetName: asset.name,
+        action: "anonimizado",
+        legalBasis: policy.legalBasis,
+        retentionYears: policy.retentionYears,
+        blockedColumns: policy.blockedColumns,
+        canAnonymize: true,
+        details: `Retenção parcial obrigatória (${policy.retentionYears} anos). Campos bloqueados: [${policy.blockedColumns.join(", ")}] mantidos por lei. Demais campos pessoais anonimizados (hash SHA-256 ou valor nulo).`,
+      });
+    }
+  }
+  const summary = {
+    totalAssets: assetsAnalyzed.length,
+    deleted: assetsAnalyzed.filter(a => a.action === "excluido").length,
+    anonymized: assetsAnalyzed.filter(a => a.action === "anonimizado").length,
+    retained: assetsAnalyzed.filter(a => a.action === "retido_por_lei").length,
+  };
+  return {
+    dsarId,
+    subjectName: dsar.subjectName,
+    subjectDocument: dsar.subjectDocument ?? null,
+    assetsAnalyzed,
+    summary,
+    reportGeneratedAt: new Date().toISOString(),
+  };
+}
+
+export async function generateDsarPortabilityReport(dsarId: number) {
+  const dsar = await getDsarRequestById(dsarId);
+  if (!dsar) throw new Error(`DSAR #${dsarId} não encontrado`);
+  const lgpdAssets = await getLgpdAssets();
+  const dbConn = await getDb();
+  let pias: any[] = [];
+  if (dbConn && lgpdAssets.length > 0) {
+    const ids = lgpdAssets.map(a => a.id);
+    pias = await dbConn.select().from(piaAssessments)
+      .where(sql`"assetId" = ANY(${ids})`);
+  }
+  const piaMap = new Map(pias.map((p: any) => [p.assetId, p]));
+  const dadosColetados = lgpdAssets.map(asset => {
+    const pia = piaMap.get(asset.id) as any;
+    const retentionPolicy = getLegalRetentionPolicy(asset.name);
+    const categories = pia?.dataCategories
+      ? (typeof pia.dataCategories === "string" ? JSON.parse(pia.dataCategories) : pia.dataCategories)
+      : [];
+    return {
+      ativo: asset.name,
+      sistema: asset.sourceSystem ?? null,
+      classificacao: asset.sensitivity ?? "interno",
+      baseLegal: pia?.legalBasis ?? retentionPolicy?.legalBasis ?? null,
+      periodoRetencao: pia?.retentionPeriod ?? (retentionPolicy ? `${retentionPolicy.retentionYears} anos` : null),
+      categoriasDados: Array.isArray(categories) ? categories : [],
+      finalidade: pia?.purposes ?? null,
+      compartilhamentoTerceiros: pia?.thirdPartySharing ?? false,
+      transferenciaInternacional: pia?.crossBorderTransfer ?? false,
+      decisaoAutomatizada: pia?.automatedDecision ?? false,
+      medidasSeguranca: pia?.mitigationMeasures ?? null,
+    };
+  });
+  const sistemasFontes = [...new Set(lgpdAssets.map(a => a.sourceSystem).filter(Boolean))] as string[];
+  return {
+    format: "json" as const,
+    dsarId,
+    generatedAt: new Date().toISOString(),
+    titular: {
+      nome: dsar.subjectName,
+      email: dsar.subjectEmail,
+      documento: dsar.subjectDocument ?? null,
+    },
+    dadosColetados,
+    metadados: {
+      totalAtivos: lgpdAssets.length,
+      ativosRestritos: lgpdAssets.filter(a => a.sensitivity === "restrito").length,
+      ativosConfidenciais: lgpdAssets.filter(a => a.sensitivity === "confidencial").length,
+      sistemasFontes,
+      basesSistemas: ["PostgreSQL", "SAP HANA", "Databricks Unity Catalog"],
+    },
+    instrucoes: "Este relatório foi gerado automaticamente pela plataforma Lucid Data Governance em atendimento ao Art. 18, V da LGPD (Lei 13.709/2018). Para exercer outros direitos, entre em contato com o DPO: dpo@lucid-data.com",
+  };
+}
