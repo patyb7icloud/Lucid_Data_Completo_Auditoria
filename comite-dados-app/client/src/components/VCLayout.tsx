@@ -10,7 +10,7 @@ import {
   ChevronRight, Bell, History, UserCog, Settings2, MessageSquare,
   Library, BookText, Network, ShieldCheck, Lock, HelpCircle, ClipboardCheck,
   BookOpen, ShieldAlert, TrendingUp, Gauge, Zap, Globe, FileText, UserCheck, Activity, Store, Inbox, Tag, Shield, Layers, Plug,
-  BrainCircuit, AlertTriangle, PlugZap, BarChart2
+  BrainCircuit, AlertTriangle, PlugZap, BarChart2, FolderKanban
 } from "lucide-react";
 import { useI18n } from "@/contexts/I18nContext";
 import { LOCALES, type Locale } from "@/lib/i18n";
@@ -75,6 +75,9 @@ const navGroups = [
     items: [
       { href: "/mlops", icon: BrainCircuit, labelKey: "nav.mlops" },
       { href: "/riscos-ia", icon: AlertTriangle, labelKey: "nav.aiRisk" },
+      { href: "/ai-governance", icon: BrainCircuit, labelKey: "nav.aiGovernance" },
+      { href: "/llmops", icon: Bot, labelKey: "nav.llmops" },
+      { href: "/portfolio", icon: FolderKanban, labelKey: "nav.portfolio" },
       { href: "/bi-conectores", icon: PlugZap, labelKey: "nav.biConnectors" },
     ]
   },

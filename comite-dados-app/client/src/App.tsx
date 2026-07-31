@@ -63,6 +63,9 @@ import DicionarioCuradoria from "./pages/DicionarioCuradoria";
 // Lacunas Lucid Data Governance
 import MLOps from "./pages/MLOps";
 import RiscosIA from "./pages/RiscosIA";
+import AIGovernance from "./pages/AIGovernance";
+import LLMOps from "./pages/LLMOps";
+import Portfolio from "./pages/Portfolio";
 import BiConectores from "./pages/BiConectores";
 import PortalLGPD from "./pages/PortalLGPD";
 import OrganizacaoComite from "./pages/OrganizacaoComite";
@@ -132,6 +135,9 @@ function AuthenticatedApp() {
         {/* Lacunas Lucid Data Governance */}
         <Route path="/mlops" component={MLOps} />
         <Route path="/riscos-ia" component={RiscosIA} />
+        <Route path="/ai-governance" component={AIGovernance} />
+        <Route path="/llmops" component={LLMOps} />
+        <Route path="/portfolio" component={Portfolio} />
         <Route path="/bi-conectores" component={BiConectores} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />

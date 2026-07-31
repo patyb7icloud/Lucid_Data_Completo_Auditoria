@@ -1370,3 +1370,148 @@ export const intakeArtifacts = pgTable("intake_artifacts", {
 });
 export type IntakeArtifact = typeof intakeArtifacts.$inferSelect;
 export type InsertIntakeArtifact = typeof intakeArtifacts.$inferInsert;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MÓDULO 1: AI GOVERNANCE — Inventário de Sistemas de IA (R17, R18, R19, R27)
+// ═══════════════════════════════════════════════════════════════════════════════
+export const aiSystemCriticalityEnum = pgEnum("ai_system_criticality", [
+  "critico", "alto", "medio", "baixo", "nao_definido",
+]);
+export const aiSystemStatusEnum = pgEnum("ai_system_status", [
+  "ativo", "em_revisao", "descontinuado", "arquivado",
+]);
+export const aiSystems = pgTable("ai_systems", {
+  id:              serial("id").primaryKey(),
+  name:            varchar("name", { length: 256 }).notNull(),
+  description:     text("description"),
+  systemType:      varchar("system_type", { length: 128 }),
+  vendor:          varchar("vendor", { length: 256 }),
+  criticality:     aiSystemCriticalityEnum("criticality").default("nao_definido").notNull(),
+  status:          aiSystemStatusEnum("status").default("ativo").notNull(),
+  aiOwnerId:       integer("ai_owner_id"),
+  aiOwnerName:     varchar("ai_owner_name", { length: 256 }),
+  itResponsible:   varchar("it_responsible", { length: 256 }),
+  domainId:        integer("domain_id"),
+  domainName:      varchar("domain_name", { length: 256 }),
+  entraIdAppId:    varchar("entra_id_app_id", { length: 256 }),
+  certStatus:      varchar("cert_status", { length: 64 }),
+  certExpiresAt:   timestamp("cert_expires_at"),
+  riskLevel:       varchar("risk_level", { length: 64 }).default("nao_avaliado"),
+  linkedModelIds:  text("linked_model_ids"),
+  notes:           text("notes"),
+  createdById:     integer("created_by_id"),
+  createdByName:   varchar("created_by_name", { length: 256 }),
+  createdAt:       timestamp("created_at").defaultNow().notNull(),
+  updatedAt:       timestamp("updated_at").defaultNow().notNull(),
+});
+export type AiSystem = typeof aiSystems.$inferSelect;
+export type InsertAiSystem = typeof aiSystems.$inferInsert;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MÓDULO 2: LLMOPS & GENAI RISK — Agentes GenAI e Mapeamento MIP (R20, R22, R24)
+// ═══════════════════════════════════════════════════════════════════════════════
+export const genaiAgentStatusEnum = pgEnum("genai_agent_status", [
+  "producao", "staging", "desenvolvimento", "descontinuado",
+]);
+export const genaiAgentRiskEnum = pgEnum("genai_agent_risk", [
+  "critico", "alto", "medio", "baixo",
+]);
+export const genaiAgents = pgTable("genai_agents", {
+  id:                  serial("id").primaryKey(),
+  name:                varchar("name", { length: 256 }).notNull(),
+  description:         text("description"),
+  agentType:           varchar("agent_type", { length: 128 }),
+  llmProvider:         varchar("llm_provider", { length: 128 }),
+  llmModel:            varchar("llm_model", { length: 128 }),
+  status:              genaiAgentStatusEnum("status").default("desenvolvimento").notNull(),
+  riskLevel:           genaiAgentRiskEnum("risk_level").default("medio").notNull(),
+  aiOwnerId:           integer("ai_owner_id"),
+  aiOwnerName:         varchar("ai_owner_name", { length: 256 }),
+  domainId:            integer("domain_id"),
+  domainName:          varchar("domain_name", { length: 256 }),
+  dataSourcesJson:     text("data_sources_json"),
+  permissionsInherited: boolean("permissions_inherited").default(false).notNull(),
+  promptInjectionRisk: varchar("prompt_injection_risk", { length: 64 }).default("nao_avaliado"),
+  dataLeakageRisk:     varchar("data_leakage_risk", { length: 64 }).default("nao_avaliado"),
+  piiExposed:          boolean("pii_exposed").default(false).notNull(),
+  ragSourcesCount:     integer("rag_sources_count").default(0),
+  linkedSystemId:      integer("linked_system_id"),
+  mipClassification:   varchar("mip_classification", { length: 64 }),
+  databricksTag:       varchar("databricks_tag", { length: 128 }),
+  notes:               text("notes"),
+  createdById:         integer("created_by_id"),
+  createdByName:       varchar("created_by_name", { length: 256 }),
+  createdAt:           timestamp("created_at").defaultNow().notNull(),
+  updatedAt:           timestamp("updated_at").defaultNow().notNull(),
+});
+export type GenaiAgent = typeof genaiAgents.$inferSelect;
+export type InsertGenaiAgent = typeof genaiAgents.$inferInsert;
+
+export const mipDatabricksMapping = pgTable("mip_databricks_mapping", {
+  id:              serial("id").primaryKey(),
+  mipLevel:        varchar("mip_level", { length: 64 }).notNull(),
+  mipCode:         varchar("mip_code", { length: 16 }).notNull(),
+  databricksTag:   varchar("databricks_tag", { length: 128 }).notNull(),
+  dlpAction:       varchar("dlp_action", { length: 256 }),
+  description:     text("description"),
+  createdAt:       timestamp("created_at").defaultNow().notNull(),
+});
+export type MipDatabricksMapping = typeof mipDatabricksMapping.$inferSelect;
+export type InsertMipDatabricksMapping = typeof mipDatabricksMapping.$inferInsert;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MÓDULO 3: PORTFÓLIO DE INICIATIVAS & GATES (R16, R23, R26, R27)
+// ═══════════════════════════════════════════════════════════════════════════════
+export const initiativePhaseEnum = pgEnum("initiative_phase", [
+  "ideacao", "poc", "piloto", "rollout", "producao", "descontinuada",
+]);
+export const initiativeStatusEnum2 = pgEnum("initiative_status2", [
+  "rascunho", "em_andamento", "aguardando_gate", "aprovada", "pausada", "cancelada",
+]);
+export const initiativePriorityEnum = pgEnum("initiative_priority", [
+  "critica", "alta", "media", "baixa",
+]);
+export const dataInitiatives = pgTable("data_initiatives", {
+  id:              serial("id").primaryKey(),
+  title:           varchar("title", { length: 512 }).notNull(),
+  description:     text("description"),
+  initiativeType:  varchar("initiative_type", { length: 128 }),
+  phase:           initiativePhaseEnum("phase").default("ideacao").notNull(),
+  status:          initiativeStatusEnum2("status").default("rascunho").notNull(),
+  priority:        initiativePriorityEnum("priority").default("media").notNull(),
+  businessOwnerName: varchar("business_owner_name", { length: 256 }),
+  aiModelOwnerName: varchar("ai_model_owner_name", { length: 256 }),
+  domainId:        integer("domain_id"),
+  domainName:      varchar("domain_name", { length: 256 }),
+  squad:           varchar("squad", { length: 256 }),
+  riskLevel:       varchar("risk_level", { length: 64 }).default("nao_avaliado"),
+  mipSensitivity:  varchar("mip_sensitivity", { length: 64 }),
+  linkedSystemId:  integer("linked_system_id"),
+  linkedModelId:   integer("linked_model_id"),
+  linkedAgentId:   integer("linked_agent_id"),
+  gateApprovedBy:  varchar("gate_approved_by", { length: 256 }),
+  gateApprovedAt:  timestamp("gate_approved_at"),
+  gateNotes:       text("gate_notes"),
+  startDate:       timestamp("start_date"),
+  targetDate:      timestamp("target_date"),
+  tags:            text("tags"),
+  notes:           text("notes"),
+  createdById:     integer("created_by_id"),
+  createdByName:   varchar("created_by_name", { length: 256 }),
+  createdAt:       timestamp("created_at").defaultNow().notNull(),
+  updatedAt:       timestamp("updated_at").defaultNow().notNull(),
+});
+export type DataInitiative = typeof dataInitiatives.$inferSelect;
+export type InsertDataInitiative = typeof dataInitiatives.$inferInsert;
+
+export const initiativeGateHistory = pgTable("initiative_gate_history", {
+  id:            serial("id").primaryKey(),
+  initiativeId:  integer("initiative_id").notNull(),
+  fromPhase:     initiativePhaseEnum("from_phase").notNull(),
+  toPhase:       initiativePhaseEnum("to_phase").notNull(),
+  approvedBy:    varchar("approved_by", { length: 256 }),
+  approvedAt:    timestamp("approved_at").defaultNow().notNull(),
+  checklistJson: text("checklist_json"),
+  notes:         text("notes"),
+});
+export type InitiativeGateHistory = typeof initiativeGateHistory.$inferSelect;

@@ -58,6 +58,9 @@ import { mlopsRouter } from "./mlopsRouter";
 import { aiRiskRouter } from "./aiRiskRouter";
 import { biConnectorsRouter } from "./biConnectorsRouter";
 import { hubRouter } from "./hubRouter";
+import { aiGovernanceRouter } from "./aiGovernanceRouter";
+import { llmopsRouter } from "./llmopsRouter";
+import { portfolioRouter } from "./portfolioRouter";
 
 // ─── Domains Router ───────────────────────────────────────────────────────────
 const domainsRouter = router({
@@ -3895,6 +3898,10 @@ export const appRouter = router({
   biConnectors: biConnectorsRouter,
   auditoria: auditoriaRouter,
   hub: hubRouter,
+  // ─── Novos Módulos NEXA (AI Governance, LLMOps, Portfólio) ───────────────────
+  aiGovernance: aiGovernanceRouter,
+  llmops: llmopsRouter,
+  portfolio: portfolioRouter,
 });
 export type AppRouter = typeof appRouter;
 
