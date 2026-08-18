@@ -1997,11 +1997,21 @@ Inclua apenas as tags que fazem sentido para o ativo. Use somente valores que es
         "data_engineering", "marketing", "finance", "hr_confidential"
       ];
 
-      const host = process.env.DATABRICKS_HOST?.replace(/\/$/, "");
+      const configs = await db.getConnectorConfigs();
+      const databricksCfg = configs.find(c => c.type === 'databricks' && c.isActive);
+      const settings = (databricksCfg?.settings as any) || {};
+
+      const rawHost = settings.host || process.env.DATABRICKS_HOST;
+      let host = rawHost?.replace(/\/$/, "");
+      
+      if (host && !host.startsWith("http")) {
+        host = `https://${host}`;
+      }
+
       const { resolveDatabricksToken } = await import('./akvResolver');
       const token = await resolveDatabricksToken({
-        authMode: process.env.DATABRICKS_AUTH_MODE ?? "entra_id",
-        token: process.env.DATABRICKS_TOKEN
+        authMode: settings.authMode || process.env.DATABRICKS_AUTH_MODE || "entra_id",
+        token: settings.token || process.env.DATABRICKS_TOKEN
       });
 
       if (!host || !token) {
