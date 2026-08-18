@@ -21,14 +21,23 @@
 
 import type { ISourceAdapter, AssetMeta, QualityCheckResult } from "./ISourceAdapter";
 import type { QualityRule as SelectQualityRule } from "../../drizzle/schema";
+import { resolveDatabricksToken, redactDatabricksError } from "../databricksCredentials";
 
 export interface DatabricksAdapterConfig {
   /** Ex: adb-123456789.1.azuredatabricks.net (sem https://) */
   host: string;
   /** Ex: /sql/1.0/warehouses/abc1234567890ef */
   httpPath: string;
-  /** Personal Access Token */
-  token: string;
+  /** Personal Access Token; opcional quando o token vem do Azure Key Vault. */
+  token?: string;
+  /** Seleciona explicitamente a origem do token. */
+  tokenSource?: "pat" | "key_vault";
+  /** Compatibilidade com o formulário do Marketplace. */
+  useKeyVault?: boolean | string;
+  /** URL opcional do Azure Key Vault. */
+  keyVaultUrl?: string;
+  /** Nome do segredo no Azure Key Vault. */
+  keyVaultSecretName?: string;
   /** Catálogo Unity Catalog (default: hive_metastore) */
   catalog?: string;
   /** Timeout por query em ms (default: 30000) */
@@ -66,10 +75,17 @@ export class DatabricksAdapter implements ISourceAdapter {
     }
 
     const client = new DBSQLClient();
+    const { token } = await resolveDatabricksToken({
+      token: this.config.token,
+      tokenSource: this.config.tokenSource,
+      useKeyVault: this.config.useKeyVault,
+      keyVaultUrl: this.config.keyVaultUrl,
+      keyVaultSecretName: this.config.keyVaultSecretName,
+    });
     await client.connect({
       host: this.config.host.replace(/^https?:\/\//, ""),
       path: this.config.httpPath,
-      token: this.config.token,
+      token,
     });
     return client;
   }
@@ -182,7 +198,9 @@ export class DatabricksAdapter implements ISourceAdapter {
         await this.query(session, "SELECT 1");
       });
       return true;
-    } catch {
+    } catch (error) {
+      const message = error instanceof Error ? redactDatabricksError(error.message) : "falha desconhecida";
+      console.warn(`[DatabricksAdapter] Teste de conexão falhou: ${message}`);
       return false;
     }
   }
@@ -377,16 +395,17 @@ export class DatabricksAdapter implements ISourceAdapter {
     } catch (err: any) {
       // Falha de conexão ao Databricks — retorna score 0 com detalhe do erro
       const errMsg = err?.message ?? String(err ?? "erro desconhecido");
-      console.warn(`[DatabricksAdapter] Falha ao executar checks em "${assetMeta.name}": ${errMsg}`);
+      const safeErrMsg = redactDatabricksError(errMsg);
+      console.warn(`[DatabricksAdapter] Falha ao executar checks em "${assetMeta.name}": ${safeErrMsg}`);
       console.warn(`[DatabricksAdapter] tableRef resolvido: ${tableRef}`);
       // Classifica o tipo de erro para facilitar diagnóstico
       const isTableNotFound = /TABLE_OR_VIEW_NOT_FOUND|does not exist|not found/i.test(errMsg);
-      const isCatalogError = /INVALID_PARAMETER_VALUE|catalog|schema/i.test(errMsg);
+      const isCatalogError = /INVALID_PARAMETER_VALUE|catalog|schema/i.test(safeErrMsg);
       const detailMsg = isTableNotFound
         ? `Tabela não encontrada: ${tableRef}. Verifique se o catálogo/schema está correto no conector.`
         : isCatalogError
-        ? `Erro de catálogo ao acessar ${tableRef}: ${errMsg}`
-        : `Erro ao conectar ao Databricks: ${errMsg}`;
+        ? `Erro de catálogo ao acessar ${tableRef}: ${safeErrMsg}`
+        : `Erro ao conectar ao Databricks: ${safeErrMsg}`;
       results.push({
         metricName: "completude",
         score: 0,

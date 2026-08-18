@@ -116,7 +116,14 @@ function getDefaultConfig(connectorType: string): Record<string, string> {
     case "bigquery":
       return { projectId: "", dataset: "", keyFileJson: "" };
     case "databricks":
-      return { host: "", token: "", httpPath: "", catalog: "" };
+      return {
+        host: "",
+        token: "",
+        httpPath: "",
+        catalog: "",
+        useKeyVault: "false",
+        keyVaultSecretName: "Databricks-AccessToken",
+      };
     case "s3":
       return { bucket: "", region: "", accessKeyId: "", secretAccessKey: "" };
     case "dbt":
@@ -218,15 +225,34 @@ function ConnectorConfigForm({
           </div>
         </div>
       );
-    case "databricks":
+    case "databricks": {
+      const useKeyVault = value.useKeyVault === "true";
       return (
         <div className="space-y-3">
           {field("Host", "host", { placeholder: "adb-2338706343670020.0.azuredatabricks.net" })}
-          {field("Token (PAT)", "token", { type: "password" })}
           {field("HTTP Path do Warehouse", "httpPath", { placeholder: "/sql/1.0/warehouses/2ee65d6f13ec811a" })}
           {field("Catálogo", "catalog", { placeholder: "casas_bahia_mvp" })}
+          <label className="flex items-center gap-2 rounded-md border p-3 text-sm">
+            <input
+              type="checkbox"
+              checked={useKeyVault}
+              onChange={(e) => set("useKeyVault", String(e.target.checked))}
+            />
+            <span>Usar token armazenado no Azure Key Vault</span>
+          </label>
+          {useKeyVault ? (
+            <>
+              {field("Nome do segredo no Key Vault", "keyVaultSecretName", { placeholder: "Databricks-AccessToken" })}
+              <p className="text-xs text-muted-foreground">
+                O token será lido no servidor usando DefaultAzureCredential; ele não é enviado nem armazenado neste formulário.
+              </p>
+            </>
+          ) : (
+            field("Token (PAT)", "token", { type: "password" })
+          )}
         </div>
       );
+    }
     case "s3":
       return (
         <div className="grid grid-cols-2 gap-3">

@@ -58,6 +58,12 @@ import { mlopsRouter } from "./mlopsRouter";
 import { aiRiskRouter } from "./aiRiskRouter";
 import { biConnectorsRouter } from "./biConnectorsRouter";
 import { hubRouter } from "./hubRouter";
+import { DatabricksAdapter } from "./adapters/DatabricksAdapter.js";
+import {
+  DatabricksCrawlerError,
+  redactDatabricksError,
+  resolveDatabricksToken,
+} from "./databricksCredentials.js";
 
 // ─── Domains Router ───────────────────────────────────────────────────────────
 const domainsRouter = router({
@@ -3354,14 +3360,28 @@ function detectDatabricksLineage(tableNames: string[]): Array<{
   return edges;
 }
 
+function sanitizeConnectorConfigForClient<T extends { configJson: unknown; connectorType?: string }>(config: T): T {
+  if (!config.connectorType?.toLowerCase().includes("databricks")) return config;
+  const raw = config.configJson;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return config;
+  const { token: _token, ...safeConfig } = raw as Record<string, unknown>;
+  return { ...config, configJson: safeConfig };
+}
+
 const connectorsRouter = router({
   catalog: protectedProcedure.query(() => CONNECTOR_CATALOG),
 
-  list: protectedProcedure.query(() => db.getConnectorConfigs()),
+  list: protectedProcedure.query(async () => {
+    const configs = await db.getConnectorConfigs();
+    return configs.map(sanitizeConnectorConfigForClient);
+  }),
 
   get: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .query(({ input }) => db.getConnectorConfigById(input.id)),
+    .query(async ({ input }) => {
+      const config = await db.getConnectorConfigById(input.id);
+      return config ? sanitizeConnectorConfigForClient(config) : config;
+    }),
 
   create: protectedProcedure
     .input(z.object({
@@ -3378,7 +3398,7 @@ const connectorsRouter = router({
         configJson: input.configJson,
         active: input.active ?? true,
         createdById: ctx.user.id,
-      });
+      }).then(sanitizeConnectorConfigForClient);
     }),
 
   update: protectedProcedure
@@ -3391,7 +3411,25 @@ const connectorsRouter = router({
     .mutation(({ input, ctx }) => {
       if (ctx.user?.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
       const { id, ...rest } = input;
-      return db.updateConnectorConfig(id, rest);
+      return (async () => {
+        const current = await db.getConnectorConfigById(id);
+        const currentConfig = current?.configJson && typeof current.configJson === "object"
+          ? current.configJson as Record<string, unknown>
+          : {};
+        const nextConfig = rest.configJson && typeof rest.configJson === "object"
+          ? { ...(rest.configJson as Record<string, unknown>) }
+          : rest.configJson;
+        if (
+          current?.connectorType?.toLowerCase().includes("databricks") &&
+          nextConfig && typeof nextConfig === "object" &&
+          (!("token" in nextConfig) || !String((nextConfig as Record<string, unknown>).token ?? "").trim()) &&
+          String(currentConfig.token ?? "").trim()
+        ) {
+          (nextConfig as Record<string, unknown>).token = currentConfig.token;
+        }
+        const updated = await db.updateConnectorConfig(id, { ...rest, configJson: nextConfig });
+        return updated ? sanitizeConnectorConfigForClient(updated) : updated;
+      })();
     }),
 
   delete: protectedProcedure
@@ -3407,20 +3445,42 @@ const connectorsRouter = router({
       if (ctx.user?.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
       const config = await db.getConnectorConfigById(input.id);
       if (!config) throw new TRPCError({ code: "NOT_FOUND" });
-      // Try to use the registered adapter
       try {
-        const { getAdapter } = await import("./adapters/index.js");
-        const adapter = getAdapter(config.connectorType);
+        const cfg = typeof config.configJson === "string" ? JSON.parse(config.configJson) : (config.configJson ?? {});
+        const type = config.connectorType?.toLowerCase() ?? "";
+        let adapter;
+
+        if (type.includes("databricks")) {
+          const { token } = await resolveDatabricksToken(cfg);
+          adapter = new DatabricksAdapter(
+            {
+              host: String(cfg.host ?? ""),
+              httpPath: String(cfg.httpPath ?? cfg.cluster ?? ""),
+              token,
+              tokenSource: cfg.tokenSource,
+              useKeyVault: cfg.useKeyVault,
+              keyVaultUrl: cfg.keyVaultUrl,
+              keyVaultSecretName: cfg.keyVaultSecretName,
+              catalog: cfg.catalog,
+            },
+            "Databricks",
+          );
+        } else {
+          const { getAdapter } = await import("./adapters/index.js");
+          adapter = getAdapter(config.connectorType);
+        }
+
         if (!adapter) {
           await db.saveConnectorTestResult(input.id, false, "Adaptador não encontrado para este tipo de conector.");
           return { success: false, message: "Adaptador não encontrado." };
         }
         const ok = await adapter.testConnection();
-        const msg = ok ? "Conexão bem-sucedida" : "Falha ao conectar";
+        const msg = ok ? "Conexão bem-sucedida" : "Falha ao conectar ao serviço configurado.";
         await db.saveConnectorTestResult(input.id, ok, msg);
         return { success: ok, message: msg };
-      } catch (err: any) {
-        const msg = err?.message ?? "Erro desconhecido";
+      } catch (err: unknown) {
+        const rawMessage = err instanceof Error ? err.message : String(err);
+        const msg = redactDatabricksError(rawMessage);
         await db.saveConnectorTestResult(input.id, false, msg);
         return { success: false, message: msg };
       }
@@ -3443,8 +3503,19 @@ const connectorsRouter = router({
         else if (type.includes("postgres"))     result = await metadataCollector.crawlPostgres(cfg);
         else if (type.includes("sap"))          result = await metadataCollector.crawlSAPHana(cfg);
         else {
-          return { success: false, message: "Tipo de conector sem crawler disponível.", assetsFound: 0 };
+          return { success: false, errorCode: "CRAWLER_UNAVAILABLE", message: "Tipo de conector sem crawler disponível.", assetsFound: null };
         }
+        if (result.connectorUsed !== "real" || result.errors.length > 0) {
+          const message = result.errors[0] ?? "A coleta não foi validada por uma conexão real.";
+          await db.saveConnectorTestResult(input.id, false, message);
+          return {
+            success: false,
+            errorCode: result.connectorUsed !== "real" ? "SIMULATION_NOT_ALLOWED" : "SYNC_ERRORS",
+            message,
+            assetsFound: null,
+          };
+        }
+
         // Persiste os ativos descobertos reutilizando o pipeline completo do syncAll
         await metadataCollector.syncAll();
 
@@ -3465,8 +3536,15 @@ const connectorsRouter = router({
           lastTestMessage: result.errors.length > 0 ? result.errors[0] : `${result.tables.length} ativos sincronizados`,
         });
         return { success: true, message: `${result.tables.length} ativos encontrados e sincronizados.`, assetsFound: result.tables.length };
-      } catch (err: any) {
-        return { success: false, message: err?.message ?? "Erro ao sincronizar", assetsFound: 0 };
+      } catch (err: unknown) {
+        const rawMessage = err instanceof Error ? err.message : String(err);
+        const message = redactDatabricksError(rawMessage);
+        if (err instanceof DatabricksCrawlerError) {
+          await db.saveConnectorTestResult(input.id, false, message);
+          return { success: false, errorCode: err.code, message, assetsFound: null };
+        }
+        await db.saveConnectorTestResult(input.id, false, message);
+        return { success: false, errorCode: "SYNC_FAILED", message, assetsFound: null };
       }
     }),
 });

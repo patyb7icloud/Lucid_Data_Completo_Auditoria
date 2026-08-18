@@ -68,7 +68,7 @@ if (process.env.MYSQL_EXTERNAL_URL) {
 if (
   process.env.DATABRICKS_HOST &&
   process.env.DATABRICKS_HTTP_PATH &&
-  process.env.DATABRICKS_TOKEN
+  (process.env.DATABRICKS_TOKEN || process.env.AZURE_KEY_VAULT_URL)
 ) {
   registerAdapter(
     "databricks",
@@ -77,6 +77,9 @@ if (
         host: process.env.DATABRICKS_HOST,
         httpPath: process.env.DATABRICKS_HTTP_PATH,
         token: process.env.DATABRICKS_TOKEN,
+        tokenSource: process.env.AZURE_KEY_VAULT_URL && !process.env.DATABRICKS_TOKEN ? "key_vault" : "pat",
+        keyVaultUrl: process.env.AZURE_KEY_VAULT_URL,
+        keyVaultSecretName: process.env.AZURE_KEY_VAULT_SECRET_NAME,
         catalog: process.env.DATABRICKS_CATALOG,
       },
       "Databricks"

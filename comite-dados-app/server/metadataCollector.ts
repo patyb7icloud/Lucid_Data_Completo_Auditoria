@@ -2,6 +2,13 @@ import * as db from "./db";
 import { invokeLLM } from "./_core/llm";
 import { scanTableForPii } from "./piiScanner";
 import { cache } from "./cache";
+import {
+  DatabricksCredentialError,
+  DatabricksCrawlerError,
+  redactDatabricksError,
+  resolveDatabricksToken,
+  type DatabricksCredentialConfig,
+} from "./databricksCredentials";
 
 // Interface para os metadados coletados
 interface DiscoveredTable {
@@ -467,10 +474,12 @@ export class MetadataCollectorService {
   }
 
   // ─── Databricks Unity Catalog ─────────────────────────────────────────────
-  async crawlDatabricks(cfg?: { host?: string; token?: string; httpPath?: string; catalog?: string }): Promise<ConnectorResult> {
-    const host = cfg?.host ?? process.env.DATABRICKS_HOST;
-    const token = cfg?.token ?? process.env.DATABRICKS_TOKEN;
-    const httpPath = cfg?.httpPath ?? (cfg as any)?.cluster ?? process.env.DATABRICKS_HTTP_PATH;
+  async crawlDatabricks(
+    cfg?: DatabricksCredentialConfig & { host?: string; httpPath?: string; catalog?: string; cluster?: string },
+  ): Promise<ConnectorResult> {
+    const rawHost = cfg?.host ?? process.env.DATABRICKS_HOST;
+    const host = rawHost?.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    const httpPath = cfg?.httpPath ?? cfg?.cluster ?? process.env.DATABRICKS_HTTP_PATH;
     const rawCatalog = cfg?.catalog ?? process.env.DATABRICKS_CATALOG ?? 'main';
     // Catalogs with dots (e.g. "psw_bricks_2.schema") are invalid — use only the first segment
     const catalog = rawCatalog.includes('.') ? rawCatalog.split('.')[0] : rawCatalog;
@@ -478,24 +487,32 @@ export class MetadataCollectorService {
       console.warn(`[Collector] Databricks: catalog env contém ponto — usando apenas "${catalog}" como catalog.`);
     }
 
-    if (!host || !token || !httpPath) {
-      console.warn('[Collector] Databricks: DATABRICKS_HOST, DATABRICKS_TOKEN e DATABRICKS_HTTP_PATH são obrigatórios. Simulando.');
-      return {
-        tables: [
-          { name: 'silver.transactions', type: 'tabela', source: 'Databricks', description: 'Transações camada silver Delta Lake', columns: [{ name: 'id', type: 'BIGINT', description: '' }, { name: 'amount', type: 'DOUBLE', description: '' }, { name: 'ts', type: 'TIMESTAMP', description: '' }] },
-          { name: 'gold.customer_360', type: 'tabela', source: 'Databricks', description: 'Visão 360° de clientes camada gold', columns: [{ name: 'customer_id', type: 'STRING', description: '' }, { name: 'lifetime_value', type: 'DOUBLE', description: '' }] },
-        ],
-        errors: [],
-        connectorUsed: 'simulation',
-      };
+    if (!host || !httpPath) {
+      throw new DatabricksCrawlerError(
+        "CONFIG_MISSING",
+        "Configuração Databricks incompleta: host e HTTP path são obrigatórios.",
+      );
     }
 
+    let token: string;
+    try {
+      token = (await resolveDatabricksToken(cfg ?? {})).token;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Token Databricks não disponível.";
+      const code = error instanceof DatabricksCredentialError
+        ? error.code
+        : "KEY_VAULT_FAILED";
+      throw new DatabricksCrawlerError(code, message, { cause: error });
+    }
+
+    let crawlerStage: "connection" | "query" = "connection";
     try {
       // Usa SQL Warehouse via @databricks/sql (evita necessidade de permissão Unity Catalog REST API)
       const { DBSQLClient } = await import('@databricks/sql');
       const client = new DBSQLClient();
       await client.connect({ host, path: httpPath, token });
       const session = await client.openSession();
+      crawlerStage = "query";
 
       const runQuery = async (sql: string): Promise<Array<Record<string, unknown>>> => {
         const op = await session.executeStatement(sql, { runAsync: false });
@@ -563,7 +580,18 @@ export class MetadataCollectorService {
               catalog,
             });
           }
-        } catch { /* schema inacessível — pula */ }
+        } catch (schemaError) {
+          const message = schemaError instanceof Error ? schemaError.message : String(schemaError);
+          const safeMessage = redactDatabricksError(message);
+          console.warn(`[Collector] Databricks: schema ${schema} inacessível (${safeMessage}).`);
+          throw new DatabricksCrawlerError(
+            /permission|privilege|unauthori[sz]ed|access denied|insufficient/i.test(message)
+              ? "CATALOG_ACCESS_DENIED"
+              : "QUERY_FAILED",
+            `Não foi possível consultar o schema Databricks ${catalog}.${schema}: ${safeMessage}`,
+            { cause: schemaError },
+          );
+        }
       }
 
       await session.close();
@@ -571,8 +599,20 @@ export class MetadataCollectorService {
 
       return { tables, errors: [], connectorUsed: 'real' };
     } catch (err: any) {
-      console.warn(`[Collector] Databricks falhou (${err.message}).`);
-      return { tables: [], errors: [err.message], connectorUsed: 'simulation' };
+      if (err instanceof DatabricksCrawlerError) throw err;
+      const message = err instanceof Error ? err.message : String(err);
+      const safeMessage = redactDatabricksError(message);
+      const code = /permission|privilege|unauthori[sz]ed|access denied|insufficient/i.test(message)
+        ? "CATALOG_ACCESS_DENIED"
+        : crawlerStage === "query"
+          ? "QUERY_FAILED"
+          : "CONNECTION_FAILED";
+      console.warn(`[Collector] Databricks falhou (${safeMessage}).`);
+      throw new DatabricksCrawlerError(
+        code,
+        `Falha na coleta Databricks: ${safeMessage}`,
+        { cause: err },
+      );
     }
   }
 
@@ -786,39 +826,45 @@ export class MetadataCollectorService {
 
       for (const connector of connectors) {
         if (!connector.active) continue;
-        const cfg = typeof connector.configJson === 'string' ? JSON.parse(connector.configJson) : connector.configJson;
         const type = connector.connectorType?.toLowerCase() ?? '';
 
-        let result: ConnectorResult;
-        if (type.includes('sap')) result = await this.crawlSAPHana(cfg);
-        else if (type.includes('snowflake')) result = await this.crawlSnowflake(cfg);
-        else if (type.includes('bigquery')) result = await this.crawlBigQuery(cfg);
-        else if (type.includes('azure_sql') || type.includes('mssql') || type.includes('sqlserver')) result = await this.crawlAzureSQL(cfg);
-        else if (type.includes('redshift')) result = await this.crawlRedshift(cfg);
-        else if (type.includes('postgres') || type.includes('postgresql')) result = await this.crawlPostgres(cfg);
-        else if (type.includes('oracle')) result = await this.crawlOracle(cfg);
-        else if (type.includes('powerbi') || type.includes('power_bi')) result = await this.crawlPowerBI(cfg);
-        else if (type.includes('databricks')) result = await this.crawlDatabricks(cfg);
-        else if (type.includes('tableau')) result = await this.crawlTableau(cfg);
-        else if (type.includes('kafka')) result = await this.crawlKafka(cfg);
-        else continue;
+        try {
+          const cfg = typeof connector.configJson === 'string' ? JSON.parse(connector.configJson) : connector.configJson;
+          let result: ConnectorResult;
+          if (type.includes('sap')) result = await this.crawlSAPHana(cfg);
+          else if (type.includes('snowflake')) result = await this.crawlSnowflake(cfg);
+          else if (type.includes('bigquery')) result = await this.crawlBigQuery(cfg);
+          else if (type.includes('azure_sql') || type.includes('mssql') || type.includes('sqlserver')) result = await this.crawlAzureSQL(cfg);
+          else if (type.includes('redshift')) result = await this.crawlRedshift(cfg);
+          else if (type.includes('postgres') || type.includes('postgresql')) result = await this.crawlPostgres(cfg);
+          else if (type.includes('oracle')) result = await this.crawlOracle(cfg);
+          else if (type.includes('powerbi') || type.includes('power_bi')) result = await this.crawlPowerBI(cfg);
+          else if (type.includes('databricks')) result = await this.crawlDatabricks(cfg);
+          else if (type.includes('tableau')) result = await this.crawlTableau(cfg);
+          else if (type.includes('kafka')) result = await this.crawlKafka(cfg);
+          else continue;
 
-        allResults.push(result);
+          allResults.push(result);
 
-        // Atualizar status do conector
-        await db.updateConnectorConfig(connector.id, {
-          lastTestedAt: new Date(),
-          lastTestSuccess: result.connectorUsed === 'real',
-          lastTestMessage: result.errors.length > 0 ? result.errors[0] : 'OK',
-        });
+          // Atualizar status do conector
+          await db.updateConnectorConfig(connector.id, {
+            lastTestedAt: new Date(),
+            lastTestSuccess: result.connectorUsed === 'real' && result.errors.length === 0,
+            lastTestMessage: result.errors.length > 0 ? result.errors[0] : 'OK',
+          });
+        } catch (error) {
+          const rawMessage = error instanceof Error ? error.message : String(error);
+          const safeMessage = redactDatabricksError(rawMessage);
+          console.error(`[Collector] Falha no conector ${connector.name}: ${safeMessage}`);
+          await db.updateConnectorConfig(connector.id, {
+            lastTestedAt: new Date(),
+            lastTestSuccess: false,
+            lastTestMessage: safeMessage,
+          });
+        }
       }
 
-      // 2. Se nenhum conector ativo, usar simulação padrão
-      if (allResults.length === 0) {
-        const sapResult = await this.crawlSAPHana();
-        const sfResult = await this.crawlSnowflake();
-        allResults.push(sapResult, sfResult);
-      }
+      // Não há fallback simulado: sem coleta real, o catálogo permanece sem novos ativos.
 
       const allTables = allResults.flatMap(r => r.tables);
       console.log(`[Collector] ${allTables.length} ativos descobertos. Sincronizando...`);
