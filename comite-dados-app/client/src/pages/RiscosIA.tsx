@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +23,8 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Cell, PieChart, Pie, Legend, RadarChart, Radar, PolarGrid, PolarAngleAxis,
 } from "recharts";
+import { Checkbox } from "@/components/ui/checkbox";
+import { COMPLIANCE_TEMPLATES } from "@/lib/complianceTemplates";
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const LEVEL_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
@@ -70,6 +72,7 @@ const RISK_MATRIX_COLORS = [
 export default function RiscosIA() {
   const [tab, setTab] = useState("dashboard");
   const [showCreate, setShowCreate] = useState(false);
+  const [showComplianceForm, setShowComplianceForm] = useState(false);
   const [form, setForm] = useState({
     modelName: "", title: "", description: "", category: "vies",
     level: "medio", probability: "3", impact: "3",
@@ -364,6 +367,11 @@ export default function RiscosIA() {
 
           {/* Compliance Tab */}
           <TabsContent value="compliance" className="space-y-4">
+            <div className="flex justify-end mb-4">
+              <Button onClick={() => setShowComplianceForm(true)} className="bg-[#1B3A8C] gap-2">
+                <ShieldCheck className="w-4 h-4" /> Nova Avaliação de Conformidade
+              </Button>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {Object.entries(FRAMEWORK_LABELS).map(([fw, label]) => (
                 <Card key={fw}>
@@ -456,6 +464,8 @@ export default function RiscosIA() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        <ComplianceFormDialog open={showComplianceForm} onOpenChange={setShowComplianceForm} />
     </div>
   );
 }
@@ -489,5 +499,123 @@ function ComplianceFrameworkCard({ framework, color }: { framework: "lgpd" | "eu
         </div>
       ))}
     </div>
+  );
+}
+
+// ─── Sub-componente: Formulário de Compliance ──────────────────────────────────
+function ComplianceFormDialog({ open, onOpenChange }: { open: boolean, onOpenChange: (val: boolean) => void }) {
+  const { data: models = [] } = trpc.mlops.models.list.useQuery();
+  const [modelName, setModelName] = useState("");
+  const [framework, setFramework] = useState<"lgpd" | "eu_ai_act" | "iso_42001" | "nist_ai_rmf">("lgpd");
+  const [answers, setAnswers] = useState<Record<string, { passed: boolean, evidence: string }>>({});
+  
+  const upsert = trpc.aiRisk.compliance.upsert.useMutation();
+  const utils = trpc.useUtils();
+
+  const handleSave = async () => {
+    if (!modelName) { toast.error("Selecione um modelo"); return; }
+    
+    const checks = COMPLIANCE_TEMPLATES[framework] || [];
+    let hasError = false;
+    for (const check of checks) {
+      const answer = answers[check.checkName] || { passed: false, evidence: "" };
+      try {
+        await upsert.mutateAsync({
+          modelName,
+          framework,
+          checkName: check.checkName,
+          description: check.description,
+          passed: answer.passed,
+          evidence: answer.evidence,
+        });
+      } catch (e) {
+        console.error("Erro ao salvar compliance check", e);
+        hasError = true;
+      }
+    }
+    
+    if (hasError) {
+      toast.error("Ocorreu um erro ao salvar algumas verificações.");
+    } else {
+      toast.success("Avaliação de conformidade salva com sucesso!");
+      utils.aiRisk.compliance.list.invalidate();
+      onOpenChange(false);
+      setAnswers({});
+      setModelName("");
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Nova Avaliação de Conformidade</DialogTitle>
+          <DialogDescription>
+            Responda o checklist baseado no framework selecionado para atualizar o score de compliance do modelo.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="flex flex-col gap-4">
+            <div>
+              <Label>Modelo de IA</Label>
+              <Select value={modelName} onValueChange={setModelName}>
+                <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                <SelectContent>
+                  {models.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Framework Regulatório</Label>
+              <Select value={framework} onValueChange={v => setFramework(v as any)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(FRAMEWORK_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          
+          <div className="space-y-4 mt-6 border-t pt-4">
+            <h3 className="font-semibold text-[#1B3A8C] text-sm">Checklist: {FRAMEWORK_LABELS[framework]}</h3>
+            {(COMPLIANCE_TEMPLATES[framework] || []).map((check, idx) => {
+              const isPassed = answers[check.checkName]?.passed;
+              return (
+              <div key={idx} className={`p-4 border rounded-lg space-y-3 transition-colors ${isPassed ? 'bg-green-50 border-green-300' : 'bg-gray-50'}`}>
+                <div className="flex items-start gap-3">
+                  <Checkbox 
+                    id={`check-${idx}`} 
+                    checked={answers[check.checkName]?.passed || false}
+                    onCheckedChange={(checked) => setAnswers(prev => ({
+                      ...prev, 
+                      [check.checkName]: { ...prev[check.checkName], passed: checked === true }
+                    }))}
+                  />
+                  <div>
+                    <Label htmlFor={`check-${idx}`} className="font-medium cursor-pointer">{check.checkName}</Label>
+                    <p className="text-xs text-gray-500 mt-1">{check.description}</p>
+                  </div>
+                </div>
+                <Input 
+                  placeholder="Link para evidência ou justificativa (opcional)" 
+                  value={answers[check.checkName]?.evidence || ""}
+                  onChange={(e) => setAnswers(prev => ({
+                    ...prev, 
+                    [check.checkName]: { ...prev[check.checkName], evidence: e.target.value }
+                  }))}
+                  className="text-xs h-8 bg-white"
+                />
+              </div>
+            )})}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
+          <Button onClick={handleSave} disabled={upsert.isPending} className="bg-[#1B3A8C]">
+            {upsert.isPending ? "Salvando..." : "Salvar Avaliação"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
