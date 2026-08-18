@@ -2,6 +2,7 @@ import * as db from "./db";
 import { invokeLLM } from "./_core/llm";
 import { scanTableForPii } from "./piiScanner";
 import { cache } from "./cache";
+import { resolveDatabricksToken } from "./akvResolver";
 
 // Interface para os metadados coletados
 interface DiscoveredTable {
@@ -798,7 +799,15 @@ export class MetadataCollectorService {
         else if (type.includes('postgres') || type.includes('postgresql')) result = await this.crawlPostgres(cfg);
         else if (type.includes('oracle')) result = await this.crawlOracle(cfg);
         else if (type.includes('powerbi') || type.includes('power_bi')) result = await this.crawlPowerBI(cfg);
-        else if (type.includes('databricks')) result = await this.crawlDatabricks(cfg);
+        else if (type.includes('databricks')) {
+          // Resolve token AKV/Scope antes de crawlar (suporta authMode: scope | akv | token)
+          const resolvedToken = await resolveDatabricksToken(cfg).catch(() => null);
+          const effectiveCfg = resolvedToken ? { ...cfg, token: resolvedToken } : cfg;
+          if (!resolvedToken && cfg.authMode && cfg.authMode !== 'token') {
+            console.warn(`[Collector] Não foi possível resolver o token do conector Databricks "${connector.name}" — usando fallback.`);
+          }
+          result = await this.crawlDatabricks(effectiveCfg);
+        }
         else if (type.includes('tableau')) result = await this.crawlTableau(cfg);
         else if (type.includes('kafka')) result = await this.crawlKafka(cfg);
         else continue;

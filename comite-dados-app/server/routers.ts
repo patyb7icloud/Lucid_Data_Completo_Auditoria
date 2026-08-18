@@ -58,6 +58,8 @@ import { mlopsRouter } from "./mlopsRouter";
 import { aiRiskRouter } from "./aiRiskRouter";
 import { biConnectorsRouter } from "./biConnectorsRouter";
 import { hubRouter } from "./hubRouter";
+import { resolveDatabricksToken } from "./akvResolver";
+import { DatabricksAdapter } from "./adapters/DatabricksAdapter";
 
 // ─── Domains Router ───────────────────────────────────────────────────────────
 const domainsRouter = router({
@@ -3342,8 +3344,37 @@ const connectorsRouter = router({
       if (ctx.user?.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
       const config = await db.getConnectorConfigById(input.id);
       if (!config) throw new TRPCError({ code: "NOT_FOUND" });
-      // Try to use the registered adapter
       try {
+        const rawCfg = typeof config.configJson === 'string' ? JSON.parse(config.configJson) : config.configJson as Record<string, any>;
+
+        // Para Databricks: resolve o token via Scope API, AKV ou direto (todos os modos)
+        if (config.connectorType?.toLowerCase().includes("databricks")) {
+          const resolvedToken = await resolveDatabricksToken(rawCfg);
+          if (!resolvedToken) {
+            const hint = rawCfg.authMode === "scope"
+              ? `Verifique o Bootstrap Token e se o scope "${rawCfg.scopeName}" / key "${rawCfg.secretKey}" existem.`
+              : rawCfg.authMode === "akv"
+              ? "Verifique a URL do vault, nome do segredo e as permissões do Service Principal."
+              : "Preencha o campo Token (PAT).";
+            await db.saveConnectorTestResult(input.id, false, `Token não resolvido. ${hint}`);
+            return { success: false, message: `Token não resolvido — ${hint}` };
+          }
+          const adapter = new DatabricksAdapter({
+            host: rawCfg.host,
+            httpPath: rawCfg.httpPath,
+            token: resolvedToken,
+            catalog: rawCfg.catalog,
+          }, config.name);
+          const ok = await adapter.testConnection();
+          const modeLabel = rawCfg.authMode === "scope" ? `Secret Scope "${rawCfg.scopeName}"` : rawCfg.authMode === "akv" ? "AKV" : "PAT";
+          const msg = ok
+            ? `Conexão bem-sucedida (token via ${modeLabel})`
+            : `Falha ao conectar ao Databricks (modo: ${modeLabel})`;
+          await db.saveConnectorTestResult(input.id, ok, msg);
+          return { success: ok, message: msg };
+        }
+
+        // Fluxo padrão para todos os outros tipos de conector
         const { getAdapter } = await import("./adapters/index.js");
         const adapter = getAdapter(config.connectorType);
         if (!adapter) {
@@ -3369,8 +3400,28 @@ const connectorsRouter = router({
       if (!config) throw new TRPCError({ code: "NOT_FOUND" });
       try {
         const { metadataCollector } = await import("./metadataCollector.js");
-        const cfg = typeof config.configJson === 'string' ? JSON.parse(config.configJson) : config.configJson;
+        const rawCfg = typeof config.configJson === 'string' ? JSON.parse(config.configJson) : config.configJson as Record<string, any>;
         const type = config.connectorType?.toLowerCase() ?? "";
+
+        // Para Databricks: resolve token via Scope API, AKV ou direto (todos os modos)
+        let cfg = { ...rawCfg };
+        if (type.includes("databricks")) {
+          const resolvedToken = await resolveDatabricksToken(rawCfg);
+          if (!resolvedToken) {
+            return {
+              success: false,
+              message: rawCfg.authMode === "scope"
+                ? `Não foi possível obter o token via Databricks Secret Scope. Verifique scope "${rawCfg.scopeName}", key "${rawCfg.secretKey}" e o Bootstrap Token.`
+                : rawCfg.authMode === "akv"
+                ? "Não foi possível obter o token do Azure Key Vault. Verifique a URL do vault e o nome do segredo."
+                : "Token não configurado. Preencha o campo Token (PAT).",
+              assetsFound: 0,
+            };
+          }
+          cfg = { ...cfg, token: resolvedToken };
+          console.log(`[sync] Token Databricks resolvido via authMode="${rawCfg.authMode}".`);
+        }
+
         let result;
         if (type.includes("databricks"))        result = await metadataCollector.crawlDatabricks(cfg);
         else if (type.includes("snowflake"))    result = await metadataCollector.crawlSnowflake(cfg);
@@ -3380,8 +3431,9 @@ const connectorsRouter = router({
         else {
           return { success: false, message: "Tipo de conector sem crawler disponível.", assetsFound: 0 };
         }
-        // Persiste os ativos descobertos reutilizando o pipeline completo do syncAll
+        // Persiste os ativos — syncAll já resolve o token internamente para todos os conectores
         await metadataCollector.syncAll();
+
 
         // Detecta linhagem automática por padrão de camadas (bronze→silver→gold)
         if (result.tables.length > 0) {

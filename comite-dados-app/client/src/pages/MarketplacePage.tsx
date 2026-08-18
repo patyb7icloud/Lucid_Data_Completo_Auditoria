@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import {
   Card,
   CardContent,
@@ -30,7 +31,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Plus, Trash2, Play, CheckCircle, XCircle, Loader2, Settings, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Play, CheckCircle, XCircle, Loader2, Settings, RefreshCw, KeyRound, ShieldCheck } from "lucide-react";
 import { useI18n } from "@/contexts/I18nContext";
 
 type CatalogEntry = {
@@ -116,7 +117,18 @@ function getDefaultConfig(connectorType: string): Record<string, string> {
     case "bigquery":
       return { projectId: "", dataset: "", keyFileJson: "" };
     case "databricks":
-      return { host: "", token: "", httpPath: "", catalog: "" };
+      return {
+        host: "", authMode: "scope",
+        // modo token
+        token: "",
+        // modo scope (Databricks Secret Scope API)
+        bootstrapToken: "", scopeName: "key-vault-secrets", secretKey: "Databricks-AccessToken",
+        // modo akv (Azure Key Vault SDK)
+        akvVaultUrl: "", akvSecretName: "",
+        akvTenantId: "", akvClientId: "", akvClientSecret: "",
+        // comum
+        httpPath: "", catalog: "",
+      };
     case "s3":
       return { bucket: "", region: "", accessKeyId: "", secretAccessKey: "" };
     case "dbt":
@@ -144,6 +156,7 @@ function ConnectorConfigForm({
   onChange: (v: Record<string, string>) => void;
 }) {
   const set = (k: string, v: string) => onChange({ ...value, [k]: v });
+  const [spnOpen, setSpnOpen] = useState(false);
 
   const field = (label: string, key: string, opts?: { type?: string; placeholder?: string }) => (
     <ConfigField
@@ -218,15 +231,107 @@ function ConnectorConfigForm({
           </div>
         </div>
       );
-    case "databricks":
+    case "databricks": {
+      const authMode = value["authMode"] ?? "scope";
+      const isScope = authMode === "scope";
+      const isAkv   = authMode === "akv";
       return (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {field("Host", "host", { placeholder: "adb-2338706343670020.0.azuredatabricks.net" })}
-          {field("Token (PAT)", "token", { type: "password" })}
           {field("HTTP Path do Warehouse", "httpPath", { placeholder: "/sql/1.0/warehouses/2ee65d6f13ec811a" })}
-          {field("Catálogo", "catalog", { placeholder: "casas_bahia_mvp" })}
+          {field("Catálogo", "catalog", { placeholder: "hive_metastore" })}
+
+          {/* Seletor de modo de autenticação: 3 opções */}
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-3">
+            <div className="flex rounded-md overflow-hidden border border-blue-200">
+              {([
+                { id: "scope", label: "🔑 Secret Scope", desc: "Recomendado" },
+                { id: "token", label: "🧩 Token PAT",   desc: "Direto" },
+                { id: "akv",   label: "🛡️ AKV SDK",      desc: "Azure SDK" },
+              ] as const).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => set("authMode", opt.id)}
+                  className={`flex-1 py-1.5 text-xs font-medium transition-colors ${
+                    authMode === opt.id
+                      ? "bg-blue-600 text-white"
+                      : "bg-white text-gray-600 hover:bg-blue-50"
+                  }`}
+                >
+                  {opt.label}
+                  <span className="block text-[10px] opacity-70">{opt.desc}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Modo: Databricks Secret Scope */}
+            {isScope && (
+              <div className="space-y-3">
+                <div className="rounded bg-blue-100 px-2 py-1.5 text-xs text-blue-800 font-mono">
+                  dbutils.secrets.get(scope=<span className="text-purple-700">'<b>{value["scopeName"] || "key-vault-secrets"}</b>'</span>, key=<span className="text-green-700">'<b>{value["secretKey"] || "Databricks-AccessToken"}</b>'</span>)
+                </div>
+                <p className="text-xs text-blue-700">
+                  Usa a <strong>Databricks Secrets REST API</strong> — sem Azure SDK, sem Service Principal.
+                  O mesmo mecanismo do <code>dbutils.secrets.get()</code> nos seus notebooks.
+                </p>
+                {field("Nome do Scope", "scopeName", { placeholder: "key-vault-secrets" })}
+                {field("Nome da Chave (key)", "secretKey", { placeholder: "Databricks-AccessToken" })}
+                {field("Bootstrap Token (PAT de leitura)", "bootstrapToken", {
+                  type: "password",
+                  placeholder: "dapi... (PAT com permissão 'secrets/read')",
+                })}
+                <p className="text-xs text-gray-500">
+                  💡 O Bootstrap Token só precisa de permissão <strong>READ</strong> no scope. Pode ser um PAT
+                  de longa duração com escopo restrito.
+                </p>
+              </div>
+            )}
+
+            {/* Modo: Token PAT direto */}
+            {!isScope && !isAkv && (
+              <div className="space-y-3">
+                <p className="text-xs text-gray-600">Token PAT armazenado diretamente na configuração.</p>
+                {field("Token (PAT)", "token", { type: "password", placeholder: "dapi..." })}
+              </div>
+            )}
+
+            {/* Modo: Azure Key Vault SDK */}
+            {isAkv && (
+              <div className="space-y-3">
+                <p className="text-xs text-blue-700">
+                  Token lido diretamente do Azure Key Vault. Requer Managed Identity ou Service Principal.
+                </p>
+                {field("URL do Key Vault", "akvVaultUrl", {
+                  placeholder: "https://key-vault-secrets.vault.azure.net",
+                })}
+                {field("Nome do Segredo", "akvSecretName", { placeholder: "Databricks-AccessToken" })}
+                <div className="border border-blue-200 rounded-md overflow-hidden">
+                  <button
+                    type="button"
+                    className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                    onClick={() => setSpnOpen(!spnOpen)}
+                  >
+                    <span>🔑 Service Principal (dev local) {spnOpen ? "(configurado)" : "(opcional)"}</span>
+                    <span>{spnOpen ? "▲ ocultar" : "▼ expandir"}</span>
+                  </button>
+                  {spnOpen && (
+                    <div className="px-3 pb-3 space-y-2">
+                      <p className="text-xs text-amber-700 bg-amber-50 rounded p-2">
+                        ⚠️ Necessário apenas em dev local. Em produção Azure, a Managed Identity é usada automaticamente.
+                      </p>
+                      {field("Tenant ID", "akvTenantId", { placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" })}
+                      {field("Client ID", "akvClientId", { placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" })}
+                      {field("Client Secret", "akvClientSecret", { type: "password" })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       );
+    }
     case "s3":
       return (
         <div className="grid grid-cols-2 gap-3">
