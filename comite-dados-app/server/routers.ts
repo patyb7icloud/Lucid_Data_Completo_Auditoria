@@ -1998,8 +1998,10 @@ Inclua apenas as tags que fazem sentido para o ativo. Use somente valores que es
       ];
 
       const configs = await db.getConnectorConfigs();
-      const databricksCfg = configs.find(c => c.type === 'databricks' && c.isActive);
-      const settings = (databricksCfg?.settings as any) || {};
+      const databricksCfg = configs.find(c => c.connectorType?.toLowerCase() === 'databricks' && c.active);
+      const settings = databricksCfg?.configJson 
+        ? (typeof databricksCfg.configJson === 'string' ? JSON.parse(databricksCfg.configJson) : databricksCfg.configJson) 
+        : {};
 
       const rawHost = settings.host || process.env.DATABRICKS_HOST;
       let host = rawHost?.replace(/\/$/, "");
