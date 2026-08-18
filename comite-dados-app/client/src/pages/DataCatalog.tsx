@@ -208,6 +208,33 @@ export default function DataCatalog() {
 
   const { data: assets, isLoading, refetch } = trpc.governance.listAssets.useQuery({});
   const { data: participantsList } = trpc.participants.list.useQuery({});
+  
+  const { data: allLineageEdges } = trpc.governance.getAllLineage.useQuery();
+
+  const { data: lineageEdges } = trpc.governance.getLineage.useQuery(
+    { assetId: selectedAsset?.id || 0 },
+    { enabled: !!selectedAsset }
+  );
+
+  const downstreamAssets = useMemo(() => {
+    if (!lineageEdges || !selectedAsset || !assets) return [];
+    
+    const downstreamIds = new Set<number>();
+    const queue = [selectedAsset.id];
+    
+    while (queue.length > 0) {
+      const curr = queue.shift()!;
+      const edges = (lineageEdges as any[]).filter((e) => e.sourceAssetId === curr);
+      for (const edge of edges) {
+        if (!downstreamIds.has(edge.targetAssetId)) {
+          downstreamIds.add(edge.targetAssetId);
+          queue.push(edge.targetAssetId);
+        }
+      }
+    }
+
+    return (assets as any[]).filter(a => downstreamIds.has(a.id));
+  }, [lineageEdges, selectedAsset, assets]);
 
   const updateAsset = trpc.governance.updateAsset.useMutation({
     onSuccess: () => {
@@ -360,26 +387,54 @@ export default function DataCatalog() {
   };
 
   // Dados de consumo traduzidos
-  const consumptionMetrics = {
-    dashboards: [
-      { name: "PBI_FINANCEIRO_GLOBAL", area: "Financeiro", impact: "Crítico", type: "Power BI" },
-      { name: "TABLEAU_LOGISTICA_NA", area: "Logística", impact: "Alto", type: "Tableau" },
-      { name: "DASH_VENDA_DIARIA_BR", area: "Vendas", impact: "Crítico", type: "Power BI" },
-      { name: "COCKPIT_DIRETORIA_VC", area: "Executivo", impact: "Crítico", type: "Power BI" },
-    ],
-    areas: [
-      { name: "Logística", weight: 45, color: "#1B3A8C" },
-      { name: "Vendas", weight: 35, color: "#0ea5e9" },
-      { name: "Financeiro", weight: 20, color: "#f59e0b" },
-    ],
-    history: [
-      { name: 'Jan', acessos: 45 },
-      { name: 'Fev', acessos: 52 },
-      { name: 'Mar', acessos: 48 },
-      { name: 'Abr', acessos: 70 },
-      { name: 'Mai', acessos: 85 },
-    ]
-  };
+  const consumptionMetrics = useMemo(() => {
+    if (selectedAsset && downstreamAssets) {
+      const dashboards = downstreamAssets.map(asset => {
+        let type = "Tabela";
+        if (asset.name.toLowerCase().includes("dashboard") || asset.name.toLowerCase().includes("pbi")) type = "Power BI";
+        else if (asset.name.toLowerCase().includes("tableau")) type = "Tableau";
+
+        return {
+          name: asset.name,
+          area: asset.sourceSystem || "Geral",
+          impact: asset.criticality === "critica" ? "Crítico" : asset.criticality === "alta" ? "Alto" : "Médio",
+          type
+        };
+      });
+
+      const departmentCounts: Record<string, number> = {};
+      downstreamAssets.forEach(a => {
+        const dept = a.sourceSystem || "Geral";
+        departmentCounts[dept] = (departmentCounts[dept] || 0) + 1;
+      });
+      const totalCount = downstreamAssets.length;
+      const areas = Object.entries(departmentCounts).map(([name, count], index) => {
+        const colors = ["#1B3A8C", "#0ea5e9", "#f59e0b", "#10b981", "#8b5cf6"];
+        return {
+          name,
+          weight: totalCount > 0 ? Math.round((count / totalCount) * 100) : 0,
+          color: colors[index % colors.length]
+        };
+      }).sort((a, b) => b.weight - a.weight);
+
+      return {
+        dashboards,
+        areas,
+        history: [
+          { name: 'Jan', acessos: 45 },
+          { name: 'Fev', acessos: 52 },
+          { name: 'Mar', acessos: 48 },
+          { name: 'Abr', acessos: 70 },
+          { name: 'Mai', acessos: 85 },
+        ]
+      };
+    }
+    return {
+      dashboards: [],
+      areas: [],
+      history: []
+    };
+  }, [downstreamAssets, selectedAsset]);
 
   if (isLoading) return <div className="p-10 text-center font-bold text-blue-900">Sincronizando Catálogo Global...</div>;
 
@@ -699,7 +754,23 @@ export default function DataCatalog() {
           </TableHeader>
           <TableBody>
             {filteredAssets.map((asset) => {
-              const consumerCount = Math.floor((asset.businessValueScore || 0) * 0.8) + 5;
+              // Cálculo real do consumerCount para a tabela baseado em todos os edges de linhagem
+              let realConsumerCount = 0;
+              if (allLineageEdges) {
+                const downstreamIds = new Set<number>();
+                const queue = [asset.id];
+                while (queue.length > 0) {
+                  const curr = queue.shift()!;
+                  const edges = (allLineageEdges as any[]).filter((e) => e.sourceAssetId === curr);
+                  for (const edge of edges) {
+                    if (!downstreamIds.has(edge.targetAssetId)) {
+                      downstreamIds.add(edge.targetAssetId);
+                      queue.push(edge.targetAssetId);
+                    }
+                  }
+                }
+                realConsumerCount = downstreamIds.size;
+              }
               
               return (
                 <TableRow 
@@ -762,10 +833,10 @@ export default function DataCatalog() {
                       variant="ghost" 
                       size="sm" 
                       className="gap-2 text-[#1B3A8C] hover:bg-blue-50 font-black h-8 px-3 rounded-full"
-                      onClick={() => setSelectedAsset({...asset, consumerCount})}
+                      onClick={() => setSelectedAsset(asset)}
                     >
                       <Users size={14} />
-                      {consumerCount}
+                      {realConsumerCount}
                       <MousePointer2 size={12} className="opacity-0 group-hover:opacity-40 transition-opacity" />
                     </Button>
                   </TableCell>
@@ -791,7 +862,7 @@ export default function DataCatalog() {
                           <Button variant="ghost" size="sm" className="h-8 w-8 p-0"><MoreHorizontal size={16} /></Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48 shadow-2xl border-none">
-                          <DropdownMenuItem className="text-xs font-bold gap-2" onClick={() => setSelectedAsset({...asset, consumerCount})}>
+                          <DropdownMenuItem className="text-xs font-bold gap-2" onClick={() => setSelectedAsset(asset)}>
                             <BarChart3 size={14} /> Detalhes de Consumo
                           </DropdownMenuItem>
                           {isAdmin && (
@@ -853,7 +924,7 @@ export default function DataCatalog() {
             <div className="flex gap-6 mt-4">
               <div>
                 <p className="text-[10px] font-bold text-blue-300 uppercase opacity-60">Total de Consumidores</p>
-                <p className="text-2xl font-black">{selectedAsset?.consumerCount}</p>
+                <p className="text-2xl font-black">{downstreamAssets.length}</p>
               </div>
               <div className="w-px h-10 bg-white/10 self-end" />
               <div>
@@ -891,20 +962,26 @@ export default function DataCatalog() {
                   <Badge variant="outline" className="text-[9px] font-bold">{consumptionMetrics.dashboards.length} Ativos</Badge>
                 </div>
                 <div className="space-y-3">
-                  {consumptionMetrics.dashboards.map((dash) => (
-                    <div key={dash.name} className="flex items-center justify-between p-3.5 bg-white rounded-2xl border border-gray-100 shadow-sm hover:border-blue-300 hover:shadow-md transition-all cursor-default">
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-lg ${dash.type === 'Power BI' ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600'}`}>
-                          <BarChart3 size={16} />
+                  {consumptionMetrics.dashboards.length > 0 ? (
+                    consumptionMetrics.dashboards.map((dash) => (
+                      <div key={dash.name} className="flex items-center justify-between p-3.5 bg-white rounded-2xl border border-gray-100 shadow-sm hover:border-blue-300 hover:shadow-md transition-all cursor-default">
+                        <div className="flex items-center gap-3">
+                          <div className={`p-2 rounded-lg ${dash.type === 'Power BI' ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600'}`}>
+                            <BarChart3 size={16} />
+                          </div>
+                          <div>
+                            <p className="text-xs font-black text-gray-800 tracking-tight">{dash.name}</p>
+                            <p className="text-[10px] text-gray-400 font-bold uppercase">{dash.type} • {dash.area}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-xs font-black text-gray-800 tracking-tight">{dash.name}</p>
-                          <p className="text-[10px] text-gray-400 font-bold uppercase">{dash.type} • {dash.area}</p>
-                        </div>
+                        <div className={`w-2 h-2 rounded-full ${dash.impact === 'Crítico' ? 'bg-red-500' : 'bg-blue-400'} animate-pulse`} />
                       </div>
-                      <div className={`w-2 h-2 rounded-full ${dash.impact === 'Crítico' ? 'bg-red-500' : 'bg-blue-400'} animate-pulse`} />
+                    ))
+                  ) : (
+                    <div className="p-4 text-center text-gray-500 text-sm border border-dashed rounded-xl">
+                      Nenhum consumidor direto detectado na linhagem.
                     </div>
-                  ))}
+                  )}
                 </div>
               </div>
 
