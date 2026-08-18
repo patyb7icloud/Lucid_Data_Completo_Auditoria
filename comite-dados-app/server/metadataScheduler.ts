@@ -19,6 +19,7 @@ import { runGlobalGovernanceAgents } from "./agentOrchestrator";
 import { alertUnclassifiedAssets, sendGovernanceAlert } from "./teamsGovernanceAlerts";
 import { markAssetPendingPiiReview } from "./databricksPolicyService";
 import { scanTable } from "./piiScanner";
+import { syncDatabricksModels } from "./scripts/databricksMLSync";
 
 // Por padrão, roda a cada 24 horas.
 const INTERVAL_MS = 60 * 60 * 1000;
@@ -36,6 +37,9 @@ async function runCrawler(): Promise<void> {
     // 1. Sincroniza Metadados (Crawler)
     await metadataCollector.syncAll();
     await metadataCollector.processApprovedServiceNowTickets();
+
+    // 1.b Sincroniza Modelos de ML
+    await syncDatabricksModels();
 
     // 2. Executa Data Quality automaticamente
     await qualityEngine.runGlobalQualityCheck();
