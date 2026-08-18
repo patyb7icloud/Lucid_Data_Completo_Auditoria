@@ -1969,6 +1969,7 @@ Inclua apenas as tags que fazem sentido para o ativo. Use somente valores que es
       applyColumnRevoke: z.boolean().default(true),
       applyRls: z.boolean().default(false),
       rlsUserColumn: z.string().optional(),
+      bypassGroups: z.array(z.string()).optional(),
     }))
     .query(async ({ input }) => {
       const { previewPiiPolicies } = await import('./databricksPolicyService');
@@ -1984,7 +1985,57 @@ Inclua apenas as tags que fazem sentido para o ativo. Use somente valores que es
         applyColumnRevoke: input.applyColumnRevoke,
         applyRls: input.applyRls,
         rlsUserColumn: input.rlsUserColumn,
+        bypassGroups: input.bypassGroups,
       });
+    }),
+
+  /** RETORNA A LISTA DE GRUPOS DO DATABRICKS VIA SCIM API (Cenário 3) */
+  getDatabricksGroups: stewardProcedure
+    .query(async () => {
+      const fallbackGroups = [
+        "data_steward", "data_owner", "admins", "data_science", 
+        "data_engineering", "marketing", "finance", "hr_confidential"
+      ];
+
+      const host = process.env.DATABRICKS_HOST?.replace(/\/$/, "");
+      const { resolveDatabricksToken } = await import('./akvResolver');
+      const token = await resolveDatabricksToken({
+        authMode: process.env.DATABRICKS_AUTH_MODE ?? "entra_id",
+        token: process.env.DATABRICKS_TOKEN
+      });
+
+      if (!host || !token) {
+        console.log("[Databricks] Credenciais não encontradas. Retornando grupos MOCK.");
+        return fallbackGroups;
+      }
+
+      try {
+        const response = await fetch(`${host}/api/2.0/preview/scim/v2/Groups`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        });
+
+        if (!response.ok) {
+          console.warn(`[Databricks] Falha ao buscar grupos (SCIM API): HTTP ${response.status}. Usando MOCK.`);
+          return fallbackGroups;
+        }
+
+        const data = await response.json();
+        // A API do SCIM retorna os grupos no array 'Resources', cada um com 'displayName'
+        if (data.Resources && Array.isArray(data.Resources)) {
+          const databricksGroups = data.Resources.map((g: any) => g.displayName).filter(Boolean);
+          if (databricksGroups.length > 0) {
+            return databricksGroups as string[];
+          }
+        }
+        
+        return fallbackGroups;
+      } catch (error) {
+        console.error("[Databricks] Erro ao buscar grupos via SCIM API:", error);
+        return fallbackGroups;
+      }
     }),
 
   /** ETAPA 2a — Steward aprova as políticas (ainda não executa no Databricks) */
@@ -1992,10 +2043,11 @@ Inclua apenas as tags que fazem sentido para o ativo. Use somente valores que es
     .input(z.object({
       assetId: z.number(),
       notes: z.string().optional(),
+      bypassGroups: z.array(z.string()).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       const { approvePiiPolicies } = await import('./databricksPolicyService');
-      await approvePiiPolicies(input.assetId, ctx.user.email ?? '', input.notes);
+      await approvePiiPolicies(input.assetId, ctx.user.email ?? '', input.notes, input.bypassGroups);
 
       await db.createAuditLog({
         userId: ctx.user?.id, userEmail: ctx.user?.email, userName: ctx.user?.name,

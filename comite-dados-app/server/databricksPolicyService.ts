@@ -90,12 +90,17 @@ export interface PiiPolicyPreview {
 function buildMaskingFunctionSQL(
   catalog: string,
   schema: string,
-  functionName: string
+  functionName: string,
+  bypassGroups: string[] = ['data_steward', 'data_owner', 'admins']
 ): string {
+  const groupsCondition = bypassGroups
+    .map(g => `is_member('${g}')`)
+    .join(' OR ');
+
   return `
 CREATE OR REPLACE FUNCTION \`${catalog}\`.\`${schema}\`.\`${functionName}\`(col STRING)
 RETURN CASE
-  WHEN is_member('data_steward') OR is_member('data_owner') OR is_member('admins')
+  WHEN ${groupsCondition || '1=0'}
     THEN col
   ELSE '***PII***'
 END;`.trim();
@@ -125,11 +130,16 @@ function buildRowFilterFunctionSQL(
   catalog: string,
   schema: string,
   functionName: string,
-  filterColumn: string
+  filterColumn: string,
+  bypassGroups: string[] = ['data_steward', 'data_owner', 'admins']
 ): string {
+  const groupsCondition = bypassGroups
+    .map(g => `is_member('${g}')`)
+    .join(' OR ');
+
   return `
 CREATE OR REPLACE FUNCTION \`${catalog}\`.\`${schema}\`.\`${functionName}\`()
-RETURN is_member('data_steward') OR is_member('data_owner') OR is_member('admins')
+RETURN ${groupsCondition || '1=0'}
   OR current_user() = \`${filterColumn}\`;`.trim();
 }
 
@@ -228,6 +238,7 @@ export async function previewPiiPolicies(
     applyRls?: boolean;
     rlsUserColumn?: string;
     unauthorizedGroup?: string;
+    bypassGroups?: string[];
   }
 ): Promise<PiiPolicyPreview> {
   const allAssets = await db.getDataAssets();
@@ -305,7 +316,7 @@ export async function previewPiiPolicies(
       column: "*",
       policyType: "masking",
       riskLevel: "alto",
-      sql: buildMaskingFunctionSQL(catalog, schema, maskFnName),
+      sql: buildMaskingFunctionSQL(catalog, schema, maskFnName, opts.bypassGroups),
       description: `Cria/atualiza função de mascaramento '${maskFnName}' — retorna '***PII***' para usuários sem permissão.`,
     });
 
@@ -341,7 +352,7 @@ export async function previewPiiPolicies(
       column: "*",
       policyType: "rls",
       riskLevel: "alto",
-      sql: buildRowFilterFunctionSQL(catalog, schema, rlsFnName, opts.rlsUserColumn),
+      sql: buildRowFilterFunctionSQL(catalog, schema, rlsFnName, opts.rlsUserColumn, opts.bypassGroups),
       description: `Cria função de Row-Level Security '${rlsFnName}'.`,
     });
     commands.push({
@@ -377,13 +388,15 @@ export async function previewPiiPolicies(
 export async function approvePiiPolicies(
   assetId: number,
   approvedBy: string,
-  notes?: string
+  notes?: string,
+  bypassGroups?: string[]
 ): Promise<void> {
   await db.updateDataAsset(assetId, {
     piiPolicyStatus: "aprovado",
     piiPolicyReviewedBy: approvedBy,
     piiPolicyReviewedAt: new Date(),
     piiPolicyNotes: notes ?? null,
+    piiBypassGroups: bypassGroups ?? ['data_steward', 'data_owner', 'admins'],
   } as any);
   console.log(
     `[DatabricksPolicyService] Ativo #${assetId} aprovado por '${approvedBy}'. Pronto para sync via botão.`
@@ -482,6 +495,7 @@ export async function syncApprovedPiiPolicies(
     applyColumnRevoke: true,
     applyRls: false,
     unauthorizedGroup: "account users",
+    bypassGroups: (asset as any).piiBypassGroups as string[] | undefined,
     ...options,
   };
 
@@ -517,7 +531,7 @@ export async function syncApprovedPiiPolicies(
   if (opts.applyMasking) {
     const maskFnName = `mask_pii_${table.replace(/[^a-zA-Z0-9_]/g, "_")}`;
     const maskFnFQN = `${catalog}.${schema}.${maskFnName}`;
-    const maskFnSQL = buildMaskingFunctionSQL(catalog, schema, maskFnName);
+    const maskFnSQL = buildMaskingFunctionSQL(catalog, schema, maskFnName, opts.bypassGroups);
 
     const fnResult = await executeDatabricksSQL(config, maskFnSQL);
     maskingFunctionCreated = fnResult.ok;
@@ -570,7 +584,7 @@ export async function syncApprovedPiiPolicies(
   if (opts.applyRls && opts.rlsUserColumn) {
     const rlsFnName = `rls_${table.replace(/[^a-zA-Z0-9_]/g, "_")}`;
     const rlsFnFQN = `${catalog}.${schema}.${rlsFnName}`;
-    const rlsFnSQL = buildRowFilterFunctionSQL(catalog, schema, rlsFnName, opts.rlsUserColumn);
+    const rlsFnSQL = buildRowFilterFunctionSQL(catalog, schema, rlsFnName, opts.rlsUserColumn, opts.bypassGroups);
     const rlsSetSQL = buildSetRowFilterSQL(catalog, schema, table, rlsFnFQN);
 
     const rlsFnResult = await executeDatabricksSQL(config, rlsFnSQL);

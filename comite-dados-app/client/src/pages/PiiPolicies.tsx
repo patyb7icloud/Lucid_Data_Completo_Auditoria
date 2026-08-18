@@ -125,9 +125,15 @@ function AssetDetailPanel({
   const [rejectReason, setRejectReason] = useState("");
   const [showRejectInput, setShowRejectInput] = useState(false);
 
+  const [bypassGroups, setBypassGroups] = useState<string[]>(["data_steward", "data_owner", "admins"]);
+
+  const groupsQuery = trpc.governance.getDatabricksGroups.useQuery(undefined, {
+    staleTime: Infinity,
+  });
+
   // Busca o preview dos SQLs
   const preview = trpc.governance.previewPiiPolicies.useQuery(
-    { assetId: asset.id, applyMasking: true, applyColumnRevoke: true, applyRls: false },
+    { assetId: asset.id, applyMasking: true, applyColumnRevoke: true, applyRls: false, bypassGroups },
     { enabled: !!asset.id }
   );
 
@@ -152,7 +158,7 @@ function AssetDetailPanel({
   });
 
   function handleApprove() {
-    approveMutation.mutate({ assetId: asset.id, notes: notes.trim() || undefined });
+    approveMutation.mutate({ assetId: asset.id, notes: notes.trim() || undefined, bypassGroups });
   }
 
   function handleReject() {
@@ -260,8 +266,40 @@ function AssetDetailPanel({
           </>
         )}
 
-        {/* Barra de aprovação */}
+        {/* Barra de grupos de bypass */}
         <div className="border-t border-gray-100 pt-4 mt-4">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-2 flex items-center gap-2">
+            Grupos com Acesso Aberto (Bypass PII)
+          </p>
+          <div className="flex flex-wrap gap-2 items-center mb-4">
+            {groupsQuery.isLoading ? (
+              <span className="text-xs text-gray-400">Carregando grupos...</span>
+            ) : (
+              (groupsQuery.data ?? []).map((group) => {
+                const isSelected = bypassGroups.includes(group);
+                return (
+                  <Badge
+                    key={group}
+                    variant={isSelected ? "default" : "outline"}
+                    className={`cursor-pointer text-[10px] ${isSelected ? "bg-blue-600 hover:bg-blue-700" : "text-gray-500 hover:bg-gray-50"}`}
+                    onClick={() => {
+                      if (isSelected) {
+                        setBypassGroups(bypassGroups.filter(g => g !== group));
+                      } else {
+                        setBypassGroups([...bypassGroups, group]);
+                      }
+                    }}
+                  >
+                    {group}
+                  </Badge>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Barra de aprovação */}
+        <div className="border-t border-gray-100 pt-4 mt-2">
           {showRejectInput ? (
             <div className="space-y-2">
               <Textarea

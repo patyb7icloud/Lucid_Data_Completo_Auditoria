@@ -443,6 +443,7 @@ export const dataAssets = pgTable("data_assets", {
   piiPolicyReviewedAt: timestamp("piiPolicyReviewedAt"),
   piiPolicySyncedAt:   timestamp("piiPolicySyncedAt"),
   piiPolicyNotes:      text("piiPolicyNotes"),
+  piiBypassGroups:     jsonb("piiBypassGroups").$type<string[]>(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
