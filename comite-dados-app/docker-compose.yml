@@ -130,7 +130,7 @@ services:
       SERVICENOW_PASSWORD: ${SERVICENOW_PASSWORD:-}
 
       # App
-      VITE_APP_TITLE: ${VITE_APP_TITLE:-Comitê de Dados — Votorantim Cimentos}
+      VITE_APP_TITLE: ${VITE_APP_TITLE:-Lucid Data Governance}
       OWNER_OPEN_ID: ${OWNER_OPEN_ID:-}
       OWNER_NAME: ${OWNER_NAME:-}
 
@@ -156,7 +156,7 @@ services:
       # HTTPS com certificado SSL automático via Let's Encrypt
       - "443:443"
     environment:
-      # Domínio público da aplicação (ex: comite-dados.votorantimcimentos.com.br)
+      # Domínio público da aplicação (ex: lucid-data.suaempresa.com.br)
       APP_DOMAIN: ${APP_DOMAIN:-localhost}
     volumes:
       # Configuração do Caddy

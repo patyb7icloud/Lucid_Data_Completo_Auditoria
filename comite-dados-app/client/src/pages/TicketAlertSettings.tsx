@@ -538,7 +538,7 @@ function SmtpSettings() {
                     <Label htmlFor="smtp_user" className="text-xs text-gray-500">Usuário / E-mail</Label>
                     <Input 
                       id="smtp_user" 
-                      placeholder="usuario@votorantim.com" 
+                      placeholder="usuario@empresa.com" 
                       value={getVal("SMTP_USER")}
                       onChange={(e) => handleUpdateLocal("SMTP_USER", e.target.value)}
                     />
@@ -576,7 +576,7 @@ function SmtpSettings() {
                     <Label htmlFor="from_email" className="text-xs text-gray-500">E-mail de Resposta (Reply-to)</Label>
                     <Input 
                       id="from_email" 
-                      placeholder="comite.dados@votorantim.com" 
+                      placeholder="comite.dados@empresa.com" 
                       value={getVal("SMTP_FROM_EMAIL")}
                       onChange={(e) => handleUpdateLocal("SMTP_FROM_EMAIL", e.target.value)}
                     />

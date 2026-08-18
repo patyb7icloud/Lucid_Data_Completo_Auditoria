@@ -48,8 +48,8 @@ export async function generateSelfHealingSuggestions(
   );
 
   // FINOPS AI: Truncar contexto para economizar tokens
-  const safeMetadata = truncateContext(tableMetadata.rows.filter(r => !r.col_name?.startsWith('#')), 20); // max 20 colunas
-  const safeDataSample = truncateContext(dataSample.rows, 3); // max 3 linhas para IA (economia de 40% de tokens)
+  const safeMetadata = truncateContext(tableMetadata.rows.filter(r => !r.col_name?.startsWith('#')), 20);
+  const safeDataSample = truncateContext(dataSample.rows, 3);
 
   // 3. Preparar prompt para o LLM
   const prompt = `
@@ -105,23 +105,23 @@ export async function generateSelfHealingSuggestions(
 
     // Sugestão para a tabela
     const tableTags = result.tableTags ?? [];
+    const tableTagsSql = tableTags.map((tag: string) => `ALTER TABLE ${config.catalog}.${schema}.${tableName} SET TAGS ('${tag}' = 'true');`).join('\n');
     suggestions.push({
       tableName,
       suggestedDescription: result.tableDescription,
       suggestedTags: tableTags,
       confidenceScore: 0.95,
       reasoning: result.reasoning,
-      sqlCommand: [
-        `COMMENT ON TABLE ${config.catalog}.${schema}.${tableName} IS '${result.tableDescription.replace(/'/g, "''")}';`,
-        ...tableTags.map((tag: string) => `ALTER TABLE ${config.catalog}.${schema}.${tableName} SET TAGS ('${tag}' = 'true');`)
-      ].join('\n')
+      sqlCommand: `COMMENT ON TABLE ${config.catalog}.${schema}.${tableName} IS '${result.tableDescription.replace(/'/g, "''")}';` +
+                  (tableTagsSql ? '\n' + tableTagsSql : '')
     });
 
     // Sugestões para as colunas
     for (const col of result.columns) {
       let sql = `COMMENT ON COLUMN ${config.catalog}.${schema}.${tableName}.${col.name} IS '${col.description.replace(/'/g, "''")}';`;
       if (col.tags && col.tags.length > 0) {
-        sql += '\n' + col.tags.map((tag: string) => `ALTER TABLE ${config.catalog}.${schema}.${tableName} ALTER COLUMN ${col.name} SET TAGS ('${tag}' = 'true');`).join('\n');
+        const colTagsSql = col.tags.map((tag: string) => `ALTER TABLE ${config.catalog}.${schema}.${tableName} ALTER COLUMN ${col.name} SET TAGS ('${tag}' = 'true');`).join('\n');
+        sql += '\n' + colTagsSql;
       }
 
       suggestions.push({
@@ -161,7 +161,7 @@ export async function applySelfHealing(
   try {
     let count = 0;
     for (const cmd of sqlCommands) {
-      // O Databricks SQL Statement API executa um comando por vez. 
+      // O Databricks SQL Statement API executa um comando por vez.
       // Se houver múltiplos comandos na string (separados por \n), precisamos dividir.
       const individualCommands = cmd.split(';').filter(c => c.trim().length > 0);
       for (const singleCmd of individualCommands) {

@@ -2404,7 +2404,7 @@ export async function getLgpdAssets() {
   if (!db) return [];
   return db.select().from(dataAssets)
     .where(sql`(
-      sensitivity IN ('restrito','confidencial','restricted','confidential')
+      sensitivity IN ('restrito','confidencial')
       OR description LIKE '%dado pessoal%'
       OR description LIKE '%dados pessoais%'
       OR description LIKE '%PII%'
@@ -2818,7 +2818,7 @@ export async function createWorkflowStepAction(data: InsertWorkflowStepAction) {
 export async function getMyWorkflowTasks(actorOpenId: string) {
   const db = await getDb();
   if (!db) return [];
-  // Busca instâncias pending e filtra no JS (os aprovadores do step atual ficam em JSON)
+  // Busca instâncias pending e filtra no JS (JSON não é indexável no MySQL facilmente)
   const instances = await db.select().from(workflowInstances)
     .where(eq(workflowInstances.status, "pending"))
     .orderBy(desc(workflowInstances.startedAt));
@@ -3106,27 +3106,27 @@ export async function getTierSyncHistory(domainId?: number, limit = 50): Promise
   return q.orderBy(desc(tierSyncLog.syncedAt)).limit(limit);
 }
 
-// ─── Auditoria Helper Functions ──────────────────────────────────────────────
+// ─── Auditoria Databricks: Funções CRUD ──────────────────────────────────────
 import { auditSessions, analysisResults } from "./db-auditoria";
 
 export async function createAuditSession(data: any) {
   const dbConn = await getDb();
   if (!dbConn) throw new Error("DB not available");
-  const [row] = await dbConn.insert(auditSessions).values(data).returning();
-  return row.id;
+  const rows = await dbConn.insert(auditSessions).values(data).returning();
+  return rows[0]?.id;
 }
 
 export async function updateAuditSession(id: number, data: any) {
   const dbConn = await getDb();
   if (!dbConn) throw new Error("DB not available");
-  await dbConn.update(auditSessions).set({ ...data, updatedAt: new Date() }).where(eq(auditSessions.id, id));
+  return dbConn.update(auditSessions).set({ ...data, updatedAt: new Date() }).where(eq(auditSessions.id, id));
 }
 
 export async function getAuditSession(id: number) {
   const dbConn = await getDb();
   if (!dbConn) return null;
-  const [row] = await dbConn.select().from(auditSessions).where(eq(auditSessions.id, id)).limit(1);
-  return row ?? null;
+  const rows = await dbConn.select().from(auditSessions).where(eq(auditSessions.id, id));
+  return rows[0] ?? null;
 }
 
 export async function getAuditSessionsByUser(userId: number) {
@@ -3138,19 +3138,18 @@ export async function getAuditSessionsByUser(userId: number) {
 export async function createAnalysisResult(data: any) {
   const dbConn = await getDb();
   if (!dbConn) throw new Error("DB not available");
-  const [row] = await dbConn.insert(analysisResults).values(data).returning();
-  return row.id;
+  const rows = await dbConn.insert(analysisResults).values(data).returning();
+  return rows[0]?.id;
 }
 
 export async function updateAnalysisResult(id: number, data: any) {
   const dbConn = await getDb();
   if (!dbConn) throw new Error("DB not available");
-  await dbConn.update(analysisResults).set({ ...data, updatedAt: new Date() }).where(eq(analysisResults.id, id));
+  return dbConn.update(analysisResults).set({ ...data, updatedAt: new Date() }).where(eq(analysisResults.id, id));
 }
 
 export async function getAnalysisResultsBySession(sessionId: number) {
   const dbConn = await getDb();
   if (!dbConn) return [];
-  return dbConn.select().from(analysisResults).where(eq(analysisResults.sessionId, sessionId)).orderBy(analysisResults.id);
+  return dbConn.select().from(analysisResults).where(eq(analysisResults.sessionId, sessionId));
 }
-

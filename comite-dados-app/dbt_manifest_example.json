@@ -1,40 +1,40 @@
 {
   "metadata": {
-    "project_name": "comite_dados_votorantim",
+    "project_name": "comite_dados_lucid_data",
     "generated_at": "2026-05-16T03:40:00Z",
     "adapter_type": "snowflake"
   },
   "nodes": {
-    "model.votorantim.stg_sap_kna1": {
+    "model.lucid_data.stg_sap_kna1": {
       "name": "stg_sap_kna1",
       "resource_type": "model",
-      "package_name": "votorantim",
+      "package_name": "lucid_data",
       "config": { "materialized": "view" },
       "depends_on": {
-        "nodes": ["source.votorantim.sap.kna1"]
+        "nodes": ["source.lucid_data.sap.kna1"]
       }
     },
-    "model.votorantim.int_clientes_unificados": {
+    "model.lucid_data.int_clientes_unificados": {
       "name": "int_clientes_unificados",
       "resource_type": "model",
-      "package_name": "votorantim",
+      "package_name": "lucid_data",
       "config": { "materialized": "table" },
       "depends_on": {
-        "nodes": ["model.votorantim.stg_sap_kna1", "model.votorantim.stg_salesforce_accounts"]
+        "nodes": ["model.lucid_data.stg_sap_kna1", "model.lucid_data.stg_salesforce_accounts"]
       }
     },
-    "model.votorantim.mart_vendas_gold": {
+    "model.lucid_data.mart_vendas_gold": {
       "name": "mart_vendas_gold",
       "resource_type": "model",
-      "package_name": "votorantim",
+      "package_name": "lucid_data",
       "config": { "materialized": "incremental" },
       "depends_on": {
-        "nodes": ["model.votorantim.int_clientes_unificados", "model.votorantim.stg_sap_vbak"]
+        "nodes": ["model.lucid_data.int_clientes_unificados", "model.lucid_data.stg_sap_vbak"]
       }
     }
   },
   "sources": {
-    "source.votorantim.sap.kna1": {
+    "source.lucid_data.sap.kna1": {
       "name": "kna1",
       "source_name": "sap",
       "resource_type": "source"

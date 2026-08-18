@@ -4,8 +4,8 @@
 # Substitua {$APP_DOMAIN} pela variável de ambiente ou pelo domínio real.
 #
 # Exemplos de domínio:
-#   comite-dados.votorantimcimentos.com.br
-#   dados.votorantimcimentos.com.br
+#   lucid-data.suaempresa.com.br
+#   dados.suaempresa.com.br
 #
 # Para usar IP local (sem domínio), substitua o bloco por:
 #   :443 {

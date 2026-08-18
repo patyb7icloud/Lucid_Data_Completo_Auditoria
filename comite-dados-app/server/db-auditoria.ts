@@ -97,3 +97,22 @@ export const aiWeeklyMetrics = pgTable("ai_weekly_metrics", {
   anomaliesJson: json("anomaliesJson"),
   createdAt: timestamp("createdAt").notNull().defaultNow(),
 });
+
+// ─── Instância de DB compartilhada (usa a mesma conexão do db.ts principal) ──
+let _dbAuditoria: ReturnType<typeof drizzle> | null = null;
+
+export function getAuditoriaDb() {
+  if (!_dbAuditoria && process.env.DATABASE_URL) {
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    _dbAuditoria = drizzle(pool);
+  }
+  return _dbAuditoria;
+}
+
+// Alias para compatibilidade com imports existentes
+export const db = {
+  select: (...args: any[]) => getAuditoriaDb()?.select(...args),
+  insert: (...args: any[]) => getAuditoriaDb()?.insert(...args),
+  update: (...args: any[]) => getAuditoriaDb()?.update(...args),
+  delete: (...args: any[]) => getAuditoriaDb()?.delete(...args),
+};

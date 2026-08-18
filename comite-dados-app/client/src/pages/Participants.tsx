@@ -357,7 +357,7 @@ export default function Participants() {
               <Input
                 value={form.email}
                 onChange={e => handleFieldChange("email", e.target.value)}
-                placeholder="email@votorantim.com.br"
+                placeholder="email@empresa.com.br"
                 type="email"
                 className={`h-9 text-sm ${errors.email ? "border-red-500 focus-visible:ring-red-400" : ""}`}
               />
