@@ -65,11 +65,8 @@ if (process.env.MYSQL_EXTERNAL_URL) {
   registerAdapter("mysql", new GenericMysqlAdapter({ connectionUrl: process.env.MYSQL_EXTERNAL_URL }, "MySQL Externo"));
 }
 
-if (
-  process.env.DATABRICKS_HOST &&
-  process.env.DATABRICKS_HTTP_PATH &&
-  (process.env.DATABRICKS_TOKEN || process.env.AZURE_KEY_VAULT_URL)
-) {
+if (process.env.DATABRICKS_HOST) {
+  const keyVaultUrl = process.env.AZURE_KEY_VAULT_URL ?? process.env.AZURE_KEYVAULT_URL;
   registerAdapter(
     "databricks",
     new DatabricksAdapter(
@@ -77,8 +74,8 @@ if (
         host: process.env.DATABRICKS_HOST,
         httpPath: process.env.DATABRICKS_HTTP_PATH,
         token: process.env.DATABRICKS_TOKEN,
-        tokenSource: process.env.AZURE_KEY_VAULT_URL && !process.env.DATABRICKS_TOKEN ? "key_vault" : "pat",
-        keyVaultUrl: process.env.AZURE_KEY_VAULT_URL,
+        tokenSource: keyVaultUrl && !process.env.DATABRICKS_TOKEN ? "key_vault" : "pat",
+        keyVaultUrl,
         keyVaultSecretName: process.env.AZURE_KEY_VAULT_SECRET_NAME,
         catalog: process.env.DATABRICKS_CATALOG,
       },

@@ -1,9 +1,10 @@
 /**
  * DatabricksAdapter — adaptador para Databricks SQL Warehouses (Unity Catalog).
  *
- * Requer o pacote oficial: pnpm add @databricks/sql
+ * Usa a Databricks SQL Statement Execution API via cliente REST, com descoberta
+ * automática do SQL Warehouse. O HTTP path continua aceito por compatibilidade.
  *
- * Configuração via variáveis de ambiente:
+ * Variáveis de ambiente esperadas:
  *   DATABRICKS_HOST       → hostname do workspace (sem https://)
  *                           Ex: adb-123456789.1.azuredatabricks.net
  *   DATABRICKS_HTTP_PATH  → HTTP path do SQL Warehouse
@@ -22,12 +23,15 @@
 import type { ISourceAdapter, AssetMeta, QualityCheckResult } from "./ISourceAdapter";
 import type { QualityRule as SelectQualityRule } from "../../drizzle/schema";
 import { resolveDatabricksToken, redactDatabricksError } from "../databricksCredentials";
+import { DatabricksSqlRestClient, testDatabricksConnection } from "../databricksSqlRest";
 
 export interface DatabricksAdapterConfig {
   /** Ex: adb-123456789.1.azuredatabricks.net (sem https://) */
   host: string;
-  /** Ex: /sql/1.0/warehouses/abc1234567890ef */
-  httpPath: string;
+  /** Ex: /sql/1.0/warehouses/abc1234567890ef; opcional quando o warehouse é descoberto pela API REST. */
+  httpPath?: string;
+  /** ID opcional do warehouse preferido; caso ausente, usa o warehouse em execução. */
+  warehouseId?: string;
   /** Personal Access Token; opcional quando o token vem do Azure Key Vault. */
   token?: string;
   /** Seleciona explicitamente a origem do token. */
@@ -56,25 +60,6 @@ export class DatabricksAdapter implements ISourceAdapter {
   // ─── Conexão ────────────────────────────────────────────────────────────────
 
   private async connect() {
-    // Dynamic import — não falha se @databricks/sql não estiver instalado
-    let DBSQLClient: any;
-    try {
-      const mod = await import("@databricks/sql");
-      // O pacote pode exportar como named export, default, ou default.DBSQLClient
-      DBSQLClient =
-        mod.DBSQLClient ??
-        (mod as any).default?.DBSQLClient ??
-        (mod as any).default;
-      if (typeof DBSQLClient !== "function") {
-        throw new Error("DBSQLClient não é um construtor válido no pacote @databricks/sql");
-      }
-    } catch (importErr: any) {
-      throw new Error(
-        `Driver '@databricks/sql' indisponível: ${importErr?.message ?? importErr}. Execute: pnpm add @databricks/sql`
-      );
-    }
-
-    const client = new DBSQLClient();
     const { token } = await resolveDatabricksToken({
       token: this.config.token,
       tokenSource: this.config.tokenSource,
@@ -82,11 +67,15 @@ export class DatabricksAdapter implements ISourceAdapter {
       keyVaultUrl: this.config.keyVaultUrl,
       keyVaultSecretName: this.config.keyVaultSecretName,
     });
-    await client.connect({
-      host: this.config.host.replace(/^https?:\/\//, ""),
-      path: this.config.httpPath,
+    const client = new DatabricksSqlRestClient({
+      host: this.config.host,
+      httpPath: this.config.httpPath,
+      warehouseId: this.config.warehouseId,
       token,
+      catalog: this.effectiveCatalog,
+      queryTimeoutMs: this.config.queryTimeoutMs,
     });
+    await client.connect();
     return client;
   }
 
@@ -194,12 +183,27 @@ export class DatabricksAdapter implements ISourceAdapter {
 
   async testConnection(): Promise<boolean> {
     try {
-      await this.withSession(async (session) => {
-        await this.query(session, "SELECT 1");
+      const resolved = await resolveDatabricksToken({
+        token: this.config.token,
+        tokenSource: this.config.tokenSource,
+        useKeyVault: this.config.useKeyVault,
+        keyVaultUrl: this.config.keyVaultUrl,
+        keyVaultSecretName: this.config.keyVaultSecretName,
       });
-      return true;
+      const result = await testDatabricksConnection({
+        host: this.config.host,
+        httpPath: this.config.httpPath,
+        warehouseId: this.config.warehouseId,
+        token: resolved.token,
+        catalog: this.effectiveCatalog,
+        queryTimeoutMs: this.config.queryTimeoutMs,
+      });
+      if (!result.ok) {
+        console.warn(`[DatabricksAdapter] Teste de conexão falhou: ${redactDatabricksError(result.message, [resolved.token])}`);
+      }
+      return result.ok;
     } catch (error) {
-      const message = error instanceof Error ? redactDatabricksError(error.message) : "falha desconhecida";
+      const message = redactDatabricksError(error instanceof Error ? error.message : String(error));
       console.warn(`[DatabricksAdapter] Teste de conexão falhou: ${message}`);
       return false;
     }

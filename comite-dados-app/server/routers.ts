@@ -1509,13 +1509,32 @@ ${tableData}`;
 
       const host = process.env.DATABRICKS_HOST;
       const httpPath = process.env.DATABRICKS_HTTP_PATH;
-      const token = process.env.DATABRICKS_TOKEN;
-      if (!host || !httpPath || !token) {
-        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'Credenciais Databricks não configuradas no .env.' });
+      const warehouseId = process.env.DATABRICKS_WAREHOUSE_ID;
+      if (!host) {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'DATABRICKS_HOST não configurado no ambiente.' });
+      }
+
+      let token: string;
+      try {
+        const resolved = await resolveDatabricksToken({
+          token: process.env.DATABRICKS_TOKEN,
+          keyVaultUrl: process.env.AZURE_KEY_VAULT_URL ?? process.env.AZURE_KEYVAULT_URL,
+          keyVaultSecretName: process.env.AZURE_KEY_VAULT_SECRET_NAME,
+        });
+        token = resolved.token;
+      } catch (error) {
+        const message = redactDatabricksError(error instanceof Error ? error.message : String(error));
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message });
       }
 
       const { DatabricksAdapter } = await import('./adapters/DatabricksAdapter');
-      const adapter = new DatabricksAdapter({ host, httpPath, token, catalog: process.env.DATABRICKS_CATALOG });
+      const adapter = new DatabricksAdapter({
+        host,
+        httpPath,
+        warehouseId,
+        token,
+        catalog: process.env.DATABRICKS_CATALOG,
+      } as any);
 
       // Carrega políticas governadas para mapear sensitivity → tag Unity Catalog
       const policies = await db.getTagPolicies();
@@ -3455,7 +3474,8 @@ const connectorsRouter = router({
           adapter = new DatabricksAdapter(
             {
               host: String(cfg.host ?? ""),
-              httpPath: String(cfg.httpPath ?? cfg.cluster ?? ""),
+              httpPath: String(cfg.httpPath ?? cfg.cluster ?? "") || undefined,
+              warehouseId: cfg.warehouseId ? String(cfg.warehouseId) : undefined,
               token,
               tokenSource: cfg.tokenSource,
               useKeyVault: cfg.useKeyVault,

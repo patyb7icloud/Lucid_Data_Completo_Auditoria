@@ -9,6 +9,7 @@ import {
   resolveDatabricksToken,
   type DatabricksCredentialConfig,
 } from "./databricksCredentials";
+import { DatabricksSqlRestClient, type DatabricksRestSession } from "./databricksSqlRest";
 
 // Interface para os metadados coletados
 interface DiscoveredTable {
@@ -475,7 +476,14 @@ export class MetadataCollectorService {
 
   // ─── Databricks Unity Catalog ─────────────────────────────────────────────
   async crawlDatabricks(
-    cfg?: DatabricksCredentialConfig & { host?: string; httpPath?: string; catalog?: string; cluster?: string },
+    cfg?: DatabricksCredentialConfig & {
+      host?: string;
+      httpPath?: string;
+      warehouseId?: string;
+      catalog?: string;
+      cluster?: string;
+      queryTimeoutMs?: number;
+    },
   ): Promise<ConnectorResult> {
     const rawHost = cfg?.host ?? process.env.DATABRICKS_HOST;
     const host = rawHost?.replace(/^https?:\/\//, "").replace(/\/+$/, "");
@@ -487,10 +495,10 @@ export class MetadataCollectorService {
       console.warn(`[Collector] Databricks: catalog env contém ponto — usando apenas "${catalog}" como catalog.`);
     }
 
-    if (!host || !httpPath) {
+    if (!host) {
       throw new DatabricksCrawlerError(
         "CONFIG_MISSING",
-        "Configuração Databricks incompleta: host e HTTP path são obrigatórios.",
+        "Configuração Databricks incompleta: DATABRICKS_HOST é obrigatório.",
       );
     }
 
@@ -506,16 +514,26 @@ export class MetadataCollectorService {
     }
 
     let crawlerStage: "connection" | "query" = "connection";
+    let client: DatabricksSqlRestClient | undefined;
+    let session: DatabricksRestSession | undefined;
     try {
-      // Usa SQL Warehouse via @databricks/sql (evita necessidade de permissão Unity Catalog REST API)
-      const { DBSQLClient } = await import('@databricks/sql');
-      const client = new DBSQLClient();
-      await client.connect({ host, path: httpPath, token });
-      const session = await client.openSession();
+      // Replica o fluxo funcional: SQL Statement Execution API com descoberta de warehouse.
+      // O HTTP path permanece aceito para obter o warehouse ID quando informado.
+      client = new DatabricksSqlRestClient({
+        host,
+        httpPath,
+        warehouseId: cfg?.warehouseId,
+        token,
+        catalog,
+        queryTimeoutMs: cfg?.queryTimeoutMs,
+      });
+      await client.connect();
+      session = await client.openSession({ initialCatalog: catalog });
+      const activeSession = session as DatabricksRestSession;
       crawlerStage = "query";
 
       const runQuery = async (sql: string): Promise<Array<Record<string, unknown>>> => {
-        const op = await session.executeStatement(sql, { runAsync: false });
+        const op = await activeSession.executeStatement(sql, { runAsync: false });
         const result = await op.fetchAll();
         await op.close();
         return result as Array<Record<string, unknown>>;
@@ -532,7 +550,8 @@ export class MetadataCollectorService {
           const tablesRows = await runQuery(`SHOW TABLES IN \`${catalog}\`.\`${schema}\``);
           for (const t of tablesRows) {
             const tableName = (t as any).tableName ?? (t as any).table_name ?? Object.values(t)[1] as string;
-            const isTemp = (t as any).isTemporary ?? false;
+            const rawTemporary = (t as any).isTemporary;
+            const isTemp = rawTemporary === true || String(rawTemporary ?? "").toLowerCase() === "true";
             if (!tableName || isTemp) continue;
 
             let description = '';
@@ -594,9 +613,6 @@ export class MetadataCollectorService {
         }
       }
 
-      await session.close();
-      await client.close();
-
       return { tables, errors: [], connectorUsed: 'real' };
     } catch (err: any) {
       if (err instanceof DatabricksCrawlerError) throw err;
@@ -613,6 +629,9 @@ export class MetadataCollectorService {
         `Falha na coleta Databricks: ${safeMessage}`,
         { cause: err },
       );
+    } finally {
+      await session?.close().catch(() => undefined);
+      await client?.close().catch(() => undefined);
     }
   }
 

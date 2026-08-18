@@ -120,8 +120,9 @@ function getDefaultConfig(connectorType: string): Record<string, string> {
         host: "",
         token: "",
         httpPath: "",
+        warehouseId: "",
         catalog: "",
-        useKeyVault: "false",
+        useKeyVault: "true",
         keyVaultSecretName: "Databricks-AccessToken",
       };
     case "s3":
@@ -230,7 +231,8 @@ function ConnectorConfigForm({
       return (
         <div className="space-y-3">
           {field("Host", "host", { placeholder: "adb-2338706343670020.0.azuredatabricks.net" })}
-          {field("HTTP Path do Warehouse", "httpPath", { placeholder: "/sql/1.0/warehouses/2ee65d6f13ec811a" })}
+          {field("HTTP Path do Warehouse (opcional)", "httpPath", { placeholder: "/sql/1.0/warehouses/2ee65d6f13ec811a" })}
+          {field("ID do Warehouse (opcional)", "warehouseId", { placeholder: "2ee65d6f13ec811a" })}
           {field("Catálogo", "catalog", { placeholder: "casas_bahia_mvp" })}
           <label className="flex items-center gap-2 rounded-md border p-3 text-sm">
             <input
@@ -244,7 +246,7 @@ function ConnectorConfigForm({
             <>
               {field("Nome do segredo no Key Vault", "keyVaultSecretName", { placeholder: "Databricks-AccessToken" })}
               <p className="text-xs text-muted-foreground">
-                O token será lido no servidor usando DefaultAzureCredential; ele não é enviado nem armazenado neste formulário.
+                O token será lido no servidor usando DefaultAzureCredential, com fallback para Azure AD e Azure CLI; ele não é enviado nem armazenado neste formulário.
               </p>
             </>
           ) : (

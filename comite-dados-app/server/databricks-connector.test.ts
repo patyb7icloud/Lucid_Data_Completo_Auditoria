@@ -2,18 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { metadataCollector } from "./metadataCollector";
 
 const mocks = vi.hoisted(() => ({
-  DBSQLClient: vi.fn(),
   SecretClient: vi.fn(),
   DefaultAzureCredential: vi.fn(),
-  connect: vi.fn(),
-  openSession: vi.fn(),
-  closeClient: vi.fn(),
-  closeSession: vi.fn(),
-  executeStatement: vi.fn(),
-}));
-
-vi.mock("@databricks/sql", () => ({
-  DBSQLClient: mocks.DBSQLClient,
 }));
 
 vi.mock("@azure/identity", () => ({
@@ -24,61 +14,77 @@ vi.mock("@azure/keyvault-secrets", () => ({
   SecretClient: mocks.SecretClient,
 }));
 
-function configureClient(queryResults: Array<unknown[]>) {
-  let queryIndex = 0;
-  mocks.connect.mockResolvedValue(undefined);
-  mocks.closeClient.mockResolvedValue(undefined);
-  mocks.closeSession.mockResolvedValue(undefined);
-  mocks.executeStatement.mockImplementation(async () => ({
-    fetchAll: vi.fn().mockResolvedValue(queryResults[queryIndex++] ?? []),
-    close: vi.fn().mockResolvedValue(undefined),
-  }));
-  mocks.openSession.mockResolvedValue({
-    executeStatement: mocks.executeStatement,
-    close: mocks.closeSession,
-  });
-  mocks.DBSQLClient.mockImplementation(() => ({
-    connect: mocks.connect,
-    openSession: mocks.openSession,
-    close: mocks.closeClient,
-  }));
+type StatementFixture = {
+  columns: string[];
+  rows: unknown[][];
+};
+
+function jsonResponse(payload: unknown, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => payload,
+    text: async () => JSON.stringify(payload),
+  } as Response;
 }
 
-describe("crawler Databricks", () => {
+function configureRest(statements: StatementFixture[], warehouses = [{ id: "warehouse-1", name: "Warehouse 1", state: "RUNNING" }]) {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/api/2.0/sql/warehouses")) {
+      return jsonResponse({ warehouses });
+    }
+
+    if (url.includes("/api/2.0/sql/statements") && init?.method === "POST") {
+      const fixture = statements.shift() ?? { columns: [], rows: [] };
+      return jsonResponse({
+        statement_id: `statement-${statements.length}`,
+        status: { state: "SUCCEEDED" },
+        manifest: { schema: { columns: fixture.columns.map((name) => ({ name })) } },
+        result: { data_array: fixture.rows },
+      });
+    }
+
+    throw new Error(`Endpoint REST inesperado no teste: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+describe("crawler Databricks via Statement Execution API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    vi.stubGlobal("fetch", vi.fn());
     delete process.env.DATABRICKS_TOKEN;
     delete process.env.AZURE_KEY_VAULT_URL;
+    delete process.env.AZURE_KEYVAULT_URL;
+    delete process.env.DATABRICKS_WAREHOUSE_ID;
+    mocks.DefaultAzureCredential.mockImplementation(() => ({}));
   });
 
-  it("retorna CONFIG_MISSING quando não há token nem Key Vault configurado", async () => {
+  it("retorna CONFIG_MISSING quando não há token, Key Vault ou identidade Azure disponível", async () => {
     await expect(
       metadataCollector.crawlDatabricks({
         host: "adb.example.azuredatabricks.net",
-        httpPath: "/sql/1.0/warehouses/test",
         catalog: "main",
       }),
     ).rejects.toMatchObject({
       name: "DatabricksCrawlerError",
       code: "CONFIG_MISSING",
     });
-    expect(mocks.DBSQLClient).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("retorna CONNECTION_FAILED sem expor o token quando o SQL Warehouse falha", async () => {
+  it("retorna CONNECTION_FAILED sem expor o token quando a listagem de warehouses falha", async () => {
     const token = "dapi-test-token-that-must-not-leak";
-    mocks.connect.mockRejectedValue(new Error(`authentication failed for ${token}`));
-    mocks.DBSQLClient.mockImplementation(() => ({
-      connect: mocks.connect,
-      openSession: mocks.openSession,
-      close: mocks.closeClient,
-    }));
+    const fetchMock = vi.fn().mockRejectedValue(new Error(`authentication failed for ${token}`));
+    vi.stubGlobal("fetch", fetchMock);
 
     await expect(
       metadataCollector.crawlDatabricks({
         host: "adb.example.azuredatabricks.net",
-        httpPath: "/sql/1.0/warehouses/test",
         token,
         catalog: "main",
       }),
@@ -90,70 +96,87 @@ describe("crawler Databricks", () => {
     });
   });
 
-  it("resolve o token via Azure Key Vault sem incluir o segredo no resultado", async () => {
-    const getSecret = vi.fn().mockResolvedValue({ value: "dapi-key-vault-token" });
-    mocks.SecretClient.mockImplementation((url: string, credential: unknown) => ({
-      getSecret,
-      url,
-      credential,
-    }));
-    mocks.DefaultAzureCredential.mockImplementation(() => ({}));
-    configureClient([[], []]);
+  it("replica a resolução via Key Vault e envia o token somente no header da requisição", async () => {
+    const token = "dapi-key-vault-token";
+    const getSecret = vi.fn().mockResolvedValue({ value: token });
+    mocks.SecretClient.mockImplementation((url: string, credential: unknown) => ({ getSecret, url, credential }));
+    const fetchMock = configureRest([
+      { columns: ["databaseName"], rows: [["sales"]] },
+      { columns: ["database", "tableName", "isTemporary"], rows: [] },
+    ]);
 
     const result = await metadataCollector.crawlDatabricks({
       host: "adb.example.azuredatabricks.net",
-      httpPath: "/sql/1.0/warehouses/test",
       useKeyVault: "true",
       keyVaultUrl: "https://vault.example.vault.azure.net",
       keyVaultSecretName: "Databricks-AccessToken",
       catalog: "main",
     });
 
-    expect(result.connectorUsed).toBe("real");
-    expect(mocks.SecretClient).toHaveBeenCalledWith(
-      "https://vault.example.vault.azure.net",
-      expect.anything(),
-    );
+    expect(result).toEqual({ tables: [], errors: [], connectorUsed: "real" });
+    expect(mocks.SecretClient).toHaveBeenCalledWith("https://vault.example.vault.azure.net", expect.anything());
     expect(getSecret).toHaveBeenCalledWith("Databricks-AccessToken");
-    expect(mocks.connect).toHaveBeenCalledWith(expect.objectContaining({ token: "dapi-key-vault-token" }));
-    expect(JSON.stringify(result)).not.toContain("dapi-key-vault-token");
+    const warehouseRequest = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/api/2.0/sql/warehouses"));
+    expect((warehouseRequest?.[1]?.headers as Headers | undefined)?.get("Authorization")).toBe(`Bearer ${token}`);
+    expect(JSON.stringify(result)).not.toContain(token);
+  });
+
+  it("usa o fallback Azure AD quando a leitura do Key Vault falha", async () => {
+    const token = "azure-ad-token";
+    const getSecret = vi.fn().mockRejectedValue(new Error("Key Vault indisponível"));
+    const getToken = vi.fn().mockResolvedValue({ token });
+    mocks.SecretClient.mockImplementation(() => ({ getSecret }));
+    mocks.DefaultAzureCredential.mockImplementation(() => ({ getToken }));
+    configureRest([
+      { columns: ["databaseName"], rows: [["sales"]] },
+      { columns: ["database", "tableName", "isTemporary"], rows: [] },
+    ]);
+
+    const result = await metadataCollector.crawlDatabricks({
+      host: "adb.example.azuredatabricks.net",
+      useKeyVault: true,
+      keyVaultUrl: "https://vault.example.vault.azure.net",
+      catalog: "main",
+    });
+
+    expect(result.connectorUsed).toBe("real");
+    expect(getToken).toHaveBeenCalledWith("2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default");
+    expect(JSON.stringify(result)).not.toContain(token);
   });
 
   it("retorna uma coleta real válida mesmo quando o catálogo não possui ativos", async () => {
-    configureClient([
-      [{ databaseName: "sales" }],
-      [],
+    const fetchMock = configureRest([
+      { columns: ["databaseName"], rows: [["sales"]] },
+      { columns: ["database", "tableName", "isTemporary"], rows: [] },
     ]);
 
     const result = await metadataCollector.crawlDatabricks({
       host: "https://adb.example.azuredatabricks.net/",
-      httpPath: "/sql/1.0/warehouses/test",
       token: "dapi-real-token",
       catalog: "main",
     });
 
     expect(result).toEqual({ tables: [], errors: [], connectorUsed: "real" });
-    expect(mocks.connect).toHaveBeenCalledWith({
-      host: "adb.example.azuredatabricks.net",
-      path: "/sql/1.0/warehouses/test",
-      token: "dapi-real-token",
-    });
+    const warehouseRequest = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/api/2.0/sql/warehouses"));
+    expect((warehouseRequest?.[1]?.headers as Headers | undefined)?.get("Authorization")).toBe("Bearer dapi-real-token");
   });
 
-  it("retorna ativos e colunas reais quando a consulta do catálogo tem dados", async () => {
-    configureClient([
-      [{ databaseName: "sales" }],
-      [{ tableName: "orders", isTemporary: false }],
-      [{ comment: "Pedidos de clientes" }],
-      [
-        { column_name: "order_id", data_type: "bigint", comment: "Identificador" },
-        { column_name: "created_at", data_type: "timestamp", comment: "Data de criação" },
-      ],
+  it("retorna ativos e colunas reais quando as consultas do catálogo têm dados", async () => {
+    configureRest([
+      { columns: ["databaseName"], rows: [["sales"]] },
+      { columns: ["database", "tableName", "isTemporary"], rows: [["sales", "orders", "false"]] },
+      { columns: ["comment"], rows: [["Pedidos de clientes"]] },
+      {
+        columns: ["column_name", "data_type", "comment"],
+        rows: [
+          ["order_id", "bigint", "Identificador"],
+          ["created_at", "timestamp", "Data de criação"],
+        ],
+      },
     ]);
 
     const result = await metadataCollector.crawlDatabricks({
       host: "adb.example.azuredatabricks.net",
-      httpPath: "/sql/1.0/warehouses/test",
       token: "dapi-real-token",
       catalog: "main",
     });
