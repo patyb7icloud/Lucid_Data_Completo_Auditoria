@@ -3365,13 +3365,13 @@ const connectorsRouter = router({
             token: resolvedToken,
             catalog: rawCfg.catalog,
           }, config.name);
-          const ok = await adapter.testConnection();
-          const modeLabel = rawCfg.authMode === "scope" ? `Secret Scope "${rawCfg.scopeName}"` : rawCfg.authMode === "akv" ? "AKV" : "PAT";
-          const msg = ok
+          const testRes = await adapter.testConnection();
+          const modeLabel = rawCfg.authMode === "scope" ? `Secret Scope "${rawCfg.scopeName}"` : rawCfg.authMode === "akv" ? "AKV" : rawCfg.authMode === "entra_id" ? "Entra ID (CLI)" : "PAT";
+          const msg = testRes.ok
             ? `Conexão bem-sucedida (token via ${modeLabel})`
-            : `Falha ao conectar ao Databricks (modo: ${modeLabel})`;
-          await db.saveConnectorTestResult(input.id, ok, msg);
-          return { success: ok, message: msg };
+            : `Falha ao conectar ao Databricks (modo: ${modeLabel}) - ERRO: ${testRes.message}`;
+          await db.saveConnectorTestResult(input.id, testRes.ok, msg);
+          return { success: testRes.ok, message: msg };
         }
 
         // Fluxo padrão para todos os outros tipos de conector

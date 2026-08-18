@@ -18,6 +18,7 @@
 
 import { SecretClient } from "@azure/keyvault-secrets";
 import { DefaultAzureCredential, ClientSecretCredential } from "@azure/identity";
+import { execSync } from "child_process";
 
 // ─── Modo "scope": Databricks Secret Scope API ────────────────────────────────
 
@@ -111,8 +112,38 @@ export async function resolveAkvSecret(
     }
 
     const client = _clientCache.get(cacheKey)!;
-    const secret = await client.getSecret(secretName);
-    const value = secret?.value ?? null;
+    let value: string | null = null;
+    
+    try {
+      const secret = await client.getSecret(secretName);
+      value = secret?.value ?? null;
+    } catch (err: any) {
+      if (err.message?.includes("ChainedTokenCredential") || err.message?.includes("authentication failed")) {
+        console.warn("[AKV] @azure/identity falhou no Windows. Tentando fallback forçado via CLI...");
+        try {
+          const stdout = execSync("az account get-access-token --resource https://vault.azure.net --output json", { encoding: "utf8" });
+          const tokenData = JSON.parse(stdout);
+          
+          let vaultClean = vaultUrl.trim().replace(/\/$/, "");
+          const res = await fetch(`${vaultClean}/secrets/${secretName}?api-version=7.4`, {
+            headers: { Authorization: `Bearer ${tokenData.accessToken}` }
+          });
+          
+          if (res.ok) {
+            const data = await res.json();
+            value = data?.value ?? null;
+            console.log(`[AKV] Fallback via CLI funcionou! Segredo obtido.`);
+          } else {
+             throw new Error(`REST API falhou com status ${res.status}`);
+          }
+        } catch (fallbackErr: any) {
+          console.error(`[AKV] Fallback forçado falhou: ${fallbackErr.message}`);
+          throw err; // throw original error
+        }
+      } else {
+        throw err;
+      }
+    }
 
     if (!value) {
       console.warn(`[AKV] Segredo "${secretName}" encontrado mas está vazio.`);
@@ -181,6 +212,20 @@ export async function resolveDatabricksToken(cfg: Record<string, any>): Promise<
     return resolveAkvSecret(vaultUrl, secretName, spn);
   }
 
-  // ── Modo 3: Token PAT direto ─────────────────────────────────────────────────
+  // ── Modo 3: Entra ID via CLI (Bypass) ──────────────────────────────────────
+  if (authMode === "entra_id") {
+    try {
+      console.log("[Databricks] Autenticando via Azure Entra ID (CLI)...");
+      const stdout = execSync("az account get-access-token --resource 2ff814a6-3304-4ab8-85cb-cd0e6f879c1d --output json", { encoding: "utf8" });
+      const tokenData = JSON.parse(stdout);
+      console.log("[Databricks] Token Entra ID gerado com sucesso!");
+      return tokenData.accessToken;
+    } catch (err: any) {
+      console.error("[Databricks] Falha no Entra ID:", err.message);
+      return null;
+    }
+  }
+
+  // ── Modo 4: Token PAT direto ─────────────────────────────────────────────────
   return cfg.token ?? null;
 }

@@ -176,14 +176,15 @@ export class DatabricksAdapter implements ISourceAdapter {
 
   // ─── Interface pública ───────────────────────────────────────────────────────
 
-  async testConnection(): Promise<boolean> {
+  async testConnection(): Promise<{ ok: boolean; message?: string }> {
     try {
       await this.withSession(async (session) => {
         await this.query(session, "SELECT 1");
       });
-      return true;
-    } catch {
-      return false;
+      return { ok: true };
+    } catch (err: any) {
+      console.error("[DatabricksAdapter] testConnection failed:", err.message ?? err);
+      return { ok: false, message: err.message ?? String(err) };
     }
   }
 

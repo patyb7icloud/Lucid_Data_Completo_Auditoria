@@ -246,6 +246,7 @@ function ConnectorConfigForm({
             <div className="flex rounded-md overflow-hidden border border-blue-200">
               {([
                 { id: "scope", label: "🔑 Secret Scope", desc: "Recomendado" },
+                { id: "entra_id", label: "🔵 Entra ID", desc: "Bypass via CLI" },
                 { id: "token", label: "🧩 Token PAT",   desc: "Direto" },
                 { id: "akv",   label: "🛡️ AKV SDK",      desc: "Azure SDK" },
               ] as const).map((opt) => (
