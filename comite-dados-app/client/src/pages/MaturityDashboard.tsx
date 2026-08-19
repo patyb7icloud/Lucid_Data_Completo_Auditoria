@@ -359,8 +359,8 @@ export default function MaturityDashboard() {
                       <MetaIcon className={`h-5 w-5 ${activeKey === "allAssets" ? "text-blue-600" : "text-orange-600"}`} />
                     </div>
                     <div>
-                      <SheetTitle className="text-base">{meta.title}</SheetTitle>
-                      <SheetDescription className="text-xs mt-0.5">{meta.description}</SheetDescription>
+                      <SheetTitle className="text-lg text-[#1B3A8C]">{meta.title}</SheetTitle>
+                      <SheetDescription className="text-sm text-gray-600 mt-1">{meta.description}</SheetDescription>
                     </div>
                   </div>
                 </SheetHeader>
