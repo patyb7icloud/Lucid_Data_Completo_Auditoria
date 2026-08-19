@@ -71,6 +71,7 @@ import QualidadeSLA from "./pages/QualidadeSLA";
 import GestaoDemandas from "./pages/GestaoDemandas";
 import FilaAprovacoes from "./pages/FilaAprovacoes";
 import IntegracoesConectores from "./pages/IntegracoesConectores";
+import HubDashboard from "./pages/HubDashboard";
 
 function AuthenticatedApp() {
   return (
@@ -135,6 +136,7 @@ function AuthenticatedApp() {
         <Route path="/riscos-ia" component={RiscosIA} />
         <Route path="/ai-pipeline" component={AIPipeline} />
         <Route path="/bi-conectores" component={BiConectores} />
+        <Route path="/hub" component={HubDashboard} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>

@@ -89,10 +89,9 @@ function MetricsPanel() {
   };
 
   const STATUS_COLORS: Record<string, string> = {
-    submetido: "bg-blue-500", em_triagem: "bg-yellow-500",
-    aprovado_estrategico: "bg-green-500", aprovado_operacional: "bg-emerald-500",
-    em_execucao: "bg-indigo-500", concluido: "bg-teal-500",
-    retornado: "bg-orange-500", rejeitado: "bg-red-500",
+    G0: "bg-blue-500", G1: "bg-yellow-500",
+    G2: "bg-orange-500", G3: "bg-indigo-500",
+    G4: "bg-teal-500",
   };
 
   return (
@@ -675,11 +674,11 @@ function ArtifactsPanel({ intakeId }: { intakeId: number }) {
 // ─── Página principal ─────────────────────────────────────────────────────────
 
 export default function HubDashboard() {
-  const { data: intakeList = [], isLoading: loadingIntake } = trpc.intake.list.useQuery({});
-  const [selectedIntakeId, setSelectedIntakeId] = useState<number | null>(null);
+  const { data: projectList = [], isLoading: loadingProjects } = trpc.aiPipeline.list.useQuery();
+  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState("metricas");
 
-  const selectedIntake = intakeList.find((i: { id: number }) => i.id === selectedIntakeId);
+  const selectedProject = projectList.find((p: { id: number }) => p.id === selectedProjectId);
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -717,44 +716,44 @@ export default function HubDashboard() {
               <CardContent className="pt-4 pb-3">
                 <div className="flex items-center gap-3">
                   <Label className="text-sm whitespace-nowrap">Selecionar demanda:</Label>
-                  {loadingIntake ? (
+                  {loadingProjects ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <Select
-                      value={selectedIntakeId?.toString() ?? ""}
-                      onValueChange={(v) => setSelectedIntakeId(parseInt(v))}
+                      value={selectedProjectId?.toString() ?? ""}
+                      onValueChange={(v) => setSelectedProjectId(parseInt(v))}
                     >
                       <SelectTrigger className="max-w-sm">
                         <SelectValue placeholder="Escolha uma demanda..." />
                       </SelectTrigger>
                       <SelectContent>
-                        {intakeList.map((i: { id: number; title: string; status: string }) => (
-                          <SelectItem key={i.id} value={i.id.toString()}>
-                            #{i.id} — {i.title} ({i.status})
+                        {projectList.map((p: { id: number; name: string; gate: string }) => (
+                          <SelectItem key={p.id} value={p.id.toString()}>
+                            #{p.id} — {p.name} ({p.gate})
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   )}
-                  {selectedIntake && (
+                  {selectedProject && (
                     <Badge variant="outline" className="text-xs">
-                      {selectedIntake.status}
+                      {selectedProject.gate}
                     </Badge>
                   )}
                 </div>
               </CardContent>
             </Card>
 
-            {!selectedIntakeId ? (
+            {!selectedProjectId ? (
               <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                 <AlertTriangle className="h-8 w-8 mb-2 opacity-40" />
                 <p className="text-sm">Selecione uma demanda acima para visualizar os detalhes.</p>
               </div>
             ) : (
               <>
-                {tab === "gates" && <GatesPipeline intakeId={selectedIntakeId} />}
-                {tab === "business_case" && <BusinessCasePanel intakeId={selectedIntakeId} />}
-                {tab === "artefatos" && <ArtifactsPanel intakeId={selectedIntakeId} />}
+                {tab === "gates" && <GatesPipeline intakeId={selectedProjectId} />}
+                {tab === "business_case" && <BusinessCasePanel intakeId={selectedProjectId} />}
+                {tab === "artefatos" && <ArtifactsPanel intakeId={selectedProjectId} />}
               </>
             )}
           </TabsContent>

@@ -13,7 +13,7 @@ import {
   intakeLifecycle,
   intakeBusinessCase,
   intakeArtifacts,
-  intakeRequests,
+  aiProjects,
   type InsertIntakeGateHistory,
   type InsertIntakeLifecycle,
   type InsertIntakeBusinessCase,
@@ -330,59 +330,59 @@ export const hubRouter = router({
   getHubMetrics: protectedProcedure.query(async () => {
     const drizzleDb = await getDb();
     if (!drizzleDb) return { byStatus: [], byType: [], byTier: [], avgLeadTimeDays: 0, validationRate: 0, throughput90d: 0, totalActive: 0 };
-    // Total de demandas por status
+    
+    // Total de demandas por Gate (usando gate como status)
     const byStatus = await drizzleDb
       .select({
-        status: intakeRequests.status,
+        status: aiProjects.gate,
         total: count(),
       })
-      .from(intakeRequests)
-      .groupBy(intakeRequests.status);
+      .from(aiProjects)
+      .groupBy(aiProjects.gate);
 
-    // Lead Time médio (dias entre em_execucao e concluido) via ciclo de vida
+    // Lead Time médio (dias) - usando a diferença entre update e create de concluídos
     const leadTimeResult = await drizzleDb.execute(sql`
       SELECT
         ROUND(AVG(
           EXTRACT(EPOCH FROM (updated_at - created_at)) / 86400
         ), 1) AS avg_lead_time_days
-      FROM intake_lifecycle
-      WHERE phase = 'lancamento_operacional'
+      FROM ai_projects
+      WHERE status = 'completed'
     `);
 
-    // Taxa de validação (concluidos / total finalizados)
-    const concluded = byStatus.find(r => r.status === "concluido")?.total ?? 0;
-    const rejected  = byStatus.find(r => r.status === "rejeitado")?.total ?? 0;
-    const returned  = byStatus.find(r => r.status === "retornado")?.total ?? 0;
-    const totalFinalized = Number(concluded) + Number(rejected) + Number(returned);
+    const allProjects = await drizzleDb.select({ status: aiProjects.status }).from(aiProjects);
+    const completed = allProjects.filter(p => p.status === "completed").length;
+    const cancelled = allProjects.filter(p => p.status === "cancelled").length;
+    const totalFinalized = completed + cancelled;
     const validationRate = totalFinalized > 0
-      ? Math.round((Number(concluded) / totalFinalized) * 100)
+      ? Math.round((completed / totalFinalized) * 100)
       : 0;
 
     // Throughput: demandas concluídas nos últimos 90 dias
     const throughputResult = await drizzleDb.execute(sql`
       SELECT COUNT(*) AS throughput_90d
-      FROM intake_requests
-      WHERE status = 'concluido'
-        AND "reviewedAt" >= NOW() - INTERVAL '90 days'
+      FROM ai_projects
+      WHERE status = 'completed'
+        AND updated_at >= NOW() - INTERVAL '90 days'
     `);
 
-    // Distribuição por tipo de demanda
+    // Distribuição por tipo de projeto
     const byType = await drizzleDb
       .select({
-        type: intakeRequests.type,
+        type: aiProjects.projectType,
         total: count(),
       })
-      .from(intakeRequests)
-      .groupBy(intakeRequests.type);
+      .from(aiProjects)
+      .groupBy(aiProjects.projectType);
 
-    // Distribuição por prioridade (tier)
+    // Distribuição por nível de risco (tier)
     const byTier = await drizzleDb
       .select({
-        tier: intakeRequests.priorityTier,
+        tier: aiProjects.riskLevel,
         total: count(),
       })
-      .from(intakeRequests)
-      .groupBy(intakeRequests.priorityTier);
+      .from(aiProjects)
+      .groupBy(aiProjects.riskLevel);
 
     return {
       byStatus,
@@ -391,9 +391,7 @@ export const hubRouter = router({
       avgLeadTimeDays: Number((leadTimeResult.rows[0] as Record<string, unknown>)?.avg_lead_time_days ?? 0),
       validationRate,
       throughput90d: Number((throughputResult.rows[0] as Record<string, unknown>)?.throughput_90d ?? 0),
-      totalActive: byStatus
-        .filter(r => !["concluido", "rejeitado"].includes(r.status ?? ""))
-        .reduce((acc, r) => acc + Number(r.total), 0),
+      totalActive: allProjects.filter(p => p.status === "active").length,
     };
   }),
 });
