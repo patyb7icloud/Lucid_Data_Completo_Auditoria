@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import { Plus, ArrowRight, ArrowLeft, GitCommit, CheckCircle2, XCircle, ExternalLink, Activity } from "lucide-react";
+import { GitCommit, Plus, ArrowRight, ArrowLeft, ExternalLink, ShieldAlert, CheckCircle2, XCircle, AlertTriangle, Play, BrainCircuit, Activity, BarChart3, Database, Code, GitMerge } from "lucide-react";
 
 const GATES = [
   { id: "G0", title: "Intake / Ideação", color: "bg-blue-50 border-blue-200" },
@@ -27,8 +27,8 @@ export default function AIPipeline() {
   const [form, setForm] = useState<{
     name: string, description: string, department: string, 
     riskLevel: "baixo" | "medio" | "alto" | "critico",
-    servicenowTicket: string, azureDevopsUrl: string, termsAccepted: boolean
-  }>({ name: "", description: "", department: "", riskLevel: "medio", servicenowTicket: "", azureDevopsUrl: "", termsAccepted: false });
+    servicenowTicket: string, azureDevopsUrl: string, termsAccepted: boolean, projectType: string
+  }>({ name: "", description: "", department: "", riskLevel: "medio", servicenowTicket: "", azureDevopsUrl: "", termsAccepted: false, projectType: "IA" });
   
   const [transitionDialog, setTransitionDialog] = useState<{open: boolean, projectId: number, nextGate: string, gateTitle: string, checklists: string[]}>({open: false, projectId: 0, nextGate: "", gateTitle: "", checklists: []});
   const [checklistValues, setChecklistValues] = useState<{[key: number]: boolean}>({});
@@ -53,7 +53,7 @@ export default function AIPipeline() {
       utils.aiPipeline.list.invalidate();
       utils.aiPipeline.metrics.invalidate();
       setShowIntake(false);
-      setForm({ name: "", description: "", department: "", riskLevel: "medio", servicenowTicket: "", azureDevopsUrl: "", termsAccepted: false });
+      setForm({ name: "", description: "", department: "", riskLevel: "medio", servicenowTicket: "", azureDevopsUrl: "", termsAccepted: false, projectType: "IA" });
     } catch (err: any) {
       toast.error(err.message || "Erro ao criar projeto");
     }
@@ -75,25 +75,27 @@ export default function AIPipeline() {
       
       if (project.gate === "G0") {
         checklists = [
-          "Validação de Fornecedor / Third-party Risk (ex: uso de dados em APIs)",
-          "Classificação da Confidencialidade dos dados de origem mapeada"
+          "Validação de Fornecedor / Third-party Risk",
+          "Classificação da Confidencialidade dos dados"
         ];
       } else if (project.gate === "G1") {
-        checklists = [
-          "Arquitetura validada no Azure", 
-          "Risco de IA Reavaliado", 
-          "MVP aprovado pelos stakeholders",
-          "Testes de Segurança de LLM (Jailbreak / Prompt Injection / Red Teaming)",
-          "Avaliação de Viés (Fairness) e Toxicidade aprovada"
-        ];
+        if (project.projectType === "Engenharia de Dados") {
+          checklists = ["Dicionário de Dados aprovado", "Linhagem Documentada", "Pipeline de Ingestão Validado"];
+        } else if (project.projectType === "Business Intelligence (BI)") {
+          checklists = ["Homologação de Métricas com o Negócio", "Layout UX/UI Validado", "Performance do Painel testada"];
+        } else if (project.projectType === "Automação / RPA" || project.projectType === "App / Software") {
+          checklists = ["Testes Unitários Concluídos", "Análise de Vulnerabilidades (SAST/DAST)"];
+        } else {
+          checklists = ["Arquitetura validada no Azure", "Risco de IA Reavaliado", "MVP aprovado pelos stakeholders", "Testes de Segurança de LLM (Jailbreak / Red Teaming)", "Avaliação de Viés (Fairness) aprovada"];
+        }
       } else if (project.gate === "G2") {
-        checklists = [
-          "Testes de Carga / Stress concluídos", 
-          "Políticas de Segurança e LGPD aplicadas no pipeline de CI/CD",
-          "Ferramentas de Observabilidade Ativas (Detecção de Data Drift e Model Drift)",
-          "Definição de SLA e Matriz de Escalonamento de Incidentes de IA",
-          "Mecanismo de Kill-switch (Plano de Rollback) documentado"
-        ];
+        if (project.projectType === "Engenharia de Dados") {
+          checklists = ["Monitoramento de Qualidade de Dados ativo", "Políticas de Acesso de Dados aplicadas no Lake/DW"];
+        } else if (project.projectType === "Business Intelligence (BI)") {
+          checklists = ["Carga de dados agendada no Scheduler", "Acesso liberado para grupo de usuários finais"];
+        } else {
+          checklists = ["Testes de Carga / Stress concluídos", "Políticas de Segurança e LGPD aplicadas no pipeline CI/CD", "Ferramentas de Observabilidade Ativas", "Definição de SLA e Matriz de Escalonamento", "Mecanismo de Kill-switch documentado"];
+        }
       }
       
       setChecklistValues({});
@@ -114,7 +116,6 @@ export default function AIPipeline() {
   const executeMove = async (id: number, gate: string, checkedItems: {itemText: string, evidenceLink?: string}[] = []) => {
     try {
       if (checkedItems.length > 0) {
-        // Envia as respostas para o banco para fins de auditoria
         await submitChecklist.mutateAsync({
           projectId: id,
           gate: gate as any,
@@ -148,10 +149,10 @@ export default function AIPipeline() {
     <div className="p-6 space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-[#1B3A8C] flex items-center gap-2">
-            <GitCommit className="w-6 h-6" /> Ciclo de Vida de IA (Pipeline & Governança)
+          <h1 className="text-2xl font-bold text-[#1B3A8C] mb-2 flex items-center">
+            <GitMerge className="mr-2" /> Gestão de Portfólio de Projetos (Ciclo de Vida)
           </h1>
-          <p className="text-gray-500">Gestão de aprovações de Intake, ServiceNow, Go/No-Go e Azure DevOps.</p>
+          <p className="text-sm text-gray-500">Gestão de aprovações de Intake, ServiceNow, Go/No-Go e Azure DevOps.</p>
         </div>
         <div className="flex gap-4 items-center">
           {metrics && (
@@ -183,13 +184,19 @@ export default function AIPipeline() {
               {columnProjects.map((project: any) => (
                 <Card key={project.id} className="shadow-sm border-gray-200">
                   <CardContent className="p-4 space-y-3">
-                    <div className="flex justify-between items-start">
-                      <h4 className="font-semibold text-sm line-clamp-2 pr-2">{project.name}</h4>
-                      <Badge variant={project.riskLevel === 'alto' || project.riskLevel === 'critico' ? 'destructive' : 'secondary'}>
+                    <div className="flex justify-between items-start mb-2">
+                      <h3 className="font-semibold text-gray-800">{project.name}</h3>
+                      <Badge variant="outline" className={project.riskLevel === 'critico' ? 'border-red-500 text-red-700 bg-red-50' : 'border-gray-200 text-gray-600'}>
                         {project.riskLevel}
                       </Badge>
                     </div>
+                    
+                    <div className="mb-2">
+                      <Badge className="bg-[#1B3A8C] hover:bg-[#1B3A8C] text-[10px] uppercase">{project.projectType || 'IA'}</Badge>
+                    </div>
 
+                    <p className="text-xs text-gray-500 mb-4 line-clamp-2">{project.description}</p>
+                    
                     {(project.servicenowTicket || project.azureDevopsUrl) && (
                       <div className="flex gap-2 text-xs">
                         {project.servicenowTicket && (
@@ -200,8 +207,6 @@ export default function AIPipeline() {
                         )}
                       </div>
                     )}
-                    
-                    <p className="text-xs text-gray-500 line-clamp-2">{project.description}</p>
                     
                     {gate.id === "G0" && (
                       <div className="pt-2 border-t flex flex-col gap-2">
@@ -254,11 +259,24 @@ export default function AIPipeline() {
             <DialogDescription>Preencha os dados básicos para iniciar a governança e o fluxo de Business Case no G0.</DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-4 py-4">
-            <div className="col-span-2">
-              <Label>Nome do Projeto / Caso de Uso</Label>
-              <Input value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))} />
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Nome da Iniciativa</label>
+              <Input value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="Ex: Motor de Recomendação" />
             </div>
-            <div className="col-span-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Tipo de Projeto</label>
+              <Select value={form.projectType} onValueChange={(val: any) => setForm({...form, projectType: val})}>
+                <SelectTrigger><SelectValue placeholder="Selecione o tipo..." /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="IA">Inteligência Artificial (IA)</SelectItem>
+                  <SelectItem value="Engenharia de Dados">Engenharia de Dados</SelectItem>
+                  <SelectItem value="Business Intelligence (BI)">Business Intelligence (BI)</SelectItem>
+                  <SelectItem value="Automação / RPA">Automação / RPA</SelectItem>
+                  <SelectItem value="App / Software">App / Software</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2 col-span-2">
               <Label>Descrição / Objetivo de Negócio</Label>
               <Textarea rows={2} value={form.description} onChange={e => setForm(f => ({...f, description: e.target.value}))} />
             </div>

@@ -1173,6 +1173,8 @@ export const aiProjects = pgTable("ai_projects", {
   riskLevel:       riskLevelEnum("risk_level").default("medio").notNull(),
   complianceScore: integer("compliance_score").default(0),
   
+  projectType:     varchar("project_type", { length: 64 }).default("IA").notNull(),
+  
   servicenowTicket: varchar("servicenow_ticket", { length: 128 }),
   azureDevopsUrl:   varchar("azure_devops_url", { length: 512 }),
   termsAccepted:   boolean("terms_accepted").default(false).notNull(),

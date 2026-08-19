@@ -34,9 +34,10 @@ export const aiPipelineRouter = router({
   
   create: publicProcedure
     .input(z.object({
-      name: z.string().min(1, "Nome é obrigatório"),
+      name: z.string().min(3, "Nome muito curto"),
       description: z.string().optional(),
       department: z.string().optional(),
+      projectType: z.string().optional(),
       riskLevel: z.enum(["baixo", "medio", "alto", "critico"]).optional(),
       servicenowTicket: z.string().optional(),
       azureDevopsUrl: z.string().url("URL do Azure DevOps inválida").optional().or(z.literal("")),
@@ -47,10 +48,14 @@ export const aiPipelineRouter = router({
     .mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new Error("DB not initialized");
+      
+      const { aiProjects } = await import("../drizzle/schema");
+      
       const [newProject] = await db.insert(aiProjects).values({
         name: input.name,
         description: input.description,
         department: input.department,
+        projectType: input.projectType || "IA",
         riskLevel: (input.riskLevel || "medio") as any,
         servicenowTicket: input.servicenowTicket,
         azureDevopsUrl: input.azureDevopsUrl || undefined,
@@ -59,6 +64,7 @@ export const aiPipelineRouter = router({
         status: "active",
         goNoGoStatus: "pending",
       }).returning();
+      
       return newProject;
     }),
     
