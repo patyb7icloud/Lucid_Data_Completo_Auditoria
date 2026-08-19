@@ -518,6 +518,7 @@ export default function DataContracts() {
             <Button
               onClick={handleSubmit}
               disabled={!form.name || !form.assetId || createContract.isPending || updateContract.isPending}
+              className="bg-[#1B3A8C] hover:bg-[#1B3A8C]/90 text-white"
             >
               {editingId ? "Salvar alterações" : "Criar contrato"}
             </Button>

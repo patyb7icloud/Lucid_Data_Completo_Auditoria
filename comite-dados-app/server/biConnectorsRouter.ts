@@ -6,7 +6,7 @@ import { z } from "zod";
 import { eq, desc, and } from "drizzle-orm";
 import { getDb } from "./db";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
-import { biConnectors, biSyncLogs, type InsertBiConnector } from "../drizzle/schema";
+import { biConnectors, biSyncLogs, connectorConfigs, type InsertBiConnector } from "../drizzle/schema";
 
 // ─── Connectors Router ────────────────────────────────────────────────────────
 const connectorsRouter = router({
@@ -184,14 +184,28 @@ const connectorsRouter = router({
   summary: publicProcedure.query(async () => {
     const db = await getDb();
     if (!db) return { total: 0, active: 0, withErrors: 0, byType: {}, totalSyncs: 0 };
-    const all = await db.select().from(biConnectors);
-    const byType = all.reduce((acc, c) => { acc[c.type] = (acc[c.type] ?? 0) + 1; return acc; }, {} as Record<string, number>);
+    
+    const allBi = await db.select().from(biConnectors);
+    const allGeneral = await db.select().from(connectorConfigs);
+
+    const byType = allBi.reduce((acc, c) => { acc[c.type] = (acc[c.type] ?? 0) + 1; return acc; }, {} as Record<string, number>);
+    
+    allGeneral.forEach(c => {
+      // Map general connector types to BI types or "other"
+      let t = c.connectorType;
+      if (t === "power_bi") t = "powerbi";
+      else if (t === "sap_hana") t = "sap";
+      
+      const mappedType = ["powerbi", "sap", "databricks", "tableau", "looker"].includes(t) ? t : "other";
+      byType[mappedType] = (byType[mappedType] ?? 0) + 1;
+    });
+
     return {
-      total: all.length,
-      active: all.filter(c => c.isActive).length,
-      withErrors: all.filter(c => c.lastSyncStatus === "error").length,
+      total: allBi.length + allGeneral.length,
+      active: allBi.filter(c => c.isActive).length + allGeneral.filter(c => c.active).length,
+      withErrors: allBi.filter(c => c.lastSyncStatus === "error").length + allGeneral.filter(c => c.lastTestSuccess === false).length,
       byType,
-      totalSyncs: all.reduce((s, c) => s + (c.syncCount ?? 0), 0),
+      totalSyncs: allBi.reduce((s, c) => s + (c.syncCount ?? 0), 0),
     };
   }),
 });
