@@ -374,7 +374,11 @@ function GatesPipeline({ intakeId }: { intakeId: number }) {
               </div>
               <div className="flex gap-2 justify-end">
                 <Button variant="outline" onClick={() => setSelectedGate(null)}>Cancelar</Button>
-                <Button onClick={handleDecide} disabled={submitting}>
+                <Button 
+                  onClick={handleDecide} 
+                  disabled={submitting}
+                  className="bg-blue-700 text-white hover:bg-blue-800 disabled:bg-blue-400 disabled:text-white"
+                >
                   {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                   Confirmar
                 </Button>
@@ -519,7 +523,12 @@ function BusinessCasePanel({ intakeId }: { intakeId: number }) {
               rows={3}
             />
           </div>
-          <Button onClick={handleSave} disabled={saving} size="sm">
+          <Button 
+            onClick={handleSave} 
+            disabled={saving} 
+            size="sm"
+            className="bg-blue-700 text-white hover:bg-blue-800 disabled:bg-blue-400 disabled:text-white"
+          >
             {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
             Salvar Business Case
           </Button>
