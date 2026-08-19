@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,8 +8,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import { Plus, ArrowRight, ArrowLeft, GitCommit } from "lucide-react";
+import { Plus, ArrowRight, ArrowLeft, GitCommit, CheckCircle2, XCircle, ExternalLink, Activity } from "lucide-react";
 
 const GATES = [
   { id: "G0", title: "Intake / Ideação", color: "bg-blue-50 border-blue-200" },
@@ -20,36 +21,125 @@ const GATES = [
 
 export default function AIPipeline() {
   const { data: projects = [], isLoading } = trpc.aiPipeline.list.useQuery();
-  const [showIntake, setShowIntake] = useState(false);
-  const [form, setForm] = useState<{name: string, description: string, department: string, riskLevel: "baixo" | "medio" | "alto" | "critico"}>({ name: "", description: "", department: "", riskLevel: "medio" });
+  const { data: metrics } = trpc.aiPipeline.metrics.useQuery();
   
+  const [showIntake, setShowIntake] = useState(false);
+  const [form, setForm] = useState<{
+    name: string, description: string, department: string, 
+    riskLevel: "baixo" | "medio" | "alto" | "critico",
+    servicenowTicket: string, azureDevopsUrl: string, termsAccepted: boolean
+  }>({ name: "", description: "", department: "", riskLevel: "medio", servicenowTicket: "", azureDevopsUrl: "", termsAccepted: false });
+  
+  const [transitionDialog, setTransitionDialog] = useState<{open: boolean, projectId: number, nextGate: string, gateTitle: string, checklists: string[]}>({open: false, projectId: 0, nextGate: "", gateTitle: "", checklists: []});
+  const [checklistValues, setChecklistValues] = useState<{[key: number]: boolean}>({});
+  const [evidenceValues, setEvidenceValues] = useState<{[key: number]: string}>({});
+
   const createProject = trpc.aiPipeline.create.useMutation();
   const updateGate = trpc.aiPipeline.updateGate.useMutation();
+  const updateGoNoGo = trpc.aiPipeline.updateGoNoGo.useMutation();
+  const submitChecklist = trpc.aiPipeline.submitChecklist.useMutation();
   const utils = trpc.useUtils();
 
   const handleCreate = async () => {
     if (!form.name) return toast.error("Nome é obrigatório");
-    await createProject.mutateAsync(form);
-    toast.success("Iniciativa criada com sucesso no G0!");
-    utils.aiPipeline.list.invalidate();
-    setShowIntake(false);
-    setForm({ name: "", description: "", department: "", riskLevel: "medio" });
+    if (!form.termsAccepted) return toast.error("Você deve aceitar as políticas (Aceite Digital).");
+    
+    try {
+      await createProject.mutateAsync({
+        ...form,
+        termsAccepted: true
+      });
+      toast.success("Iniciativa criada com sucesso no G0!");
+      utils.aiPipeline.list.invalidate();
+      utils.aiPipeline.metrics.invalidate();
+      setShowIntake(false);
+      setForm({ name: "", description: "", department: "", riskLevel: "medio", servicenowTicket: "", azureDevopsUrl: "", termsAccepted: false });
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao criar projeto");
+    }
   };
 
-  const handleMove = async (id: number, currentGate: string, direction: "next" | "prev") => {
-    const currentIndex = GATES.findIndex(g => g.id === currentGate);
+  const attemptMove = (project: any, direction: "next" | "prev") => {
+    const currentIndex = GATES.findIndex(g => g.id === project.gate);
     const nextIndex = direction === "next" ? currentIndex + 1 : currentIndex - 1;
     if (nextIndex < 0 || nextIndex >= GATES.length) return;
     
-    // Simulação de bloqueio para aprovação Compliance
-    if (currentGate === "G1" && direction === "next") {
-      // Exemplo: Opcional - Exigir aprovação de compliance (mock)
-      toast.info("Avaliando compliance e aprovando passagem para G2...");
+    const nextGate = GATES[nextIndex];
+
+    if (direction === "next" && project.gate === "G0" && project.goNoGoStatus !== "go") {
+      return toast.error("O Business Case deve ser aprovado (GO) antes de mover para Desenvolvimento.");
     }
 
-    await updateGate.mutateAsync({ id, gate: GATES[nextIndex].id as any });
-    toast.success(`Projeto movido para ${GATES[nextIndex].id}`);
-    utils.aiPipeline.list.invalidate();
+    if (direction === "next" && (project.gate === "G0" || project.gate === "G1" || project.gate === "G2")) {
+      let checklists: string[] = [];
+      
+      if (project.gate === "G0") {
+        checklists = [
+          "Validação de Fornecedor / Third-party Risk (ex: uso de dados em APIs)",
+          "Classificação da Confidencialidade dos dados de origem mapeada"
+        ];
+      } else if (project.gate === "G1") {
+        checklists = [
+          "Arquitetura validada no Azure", 
+          "Risco de IA Reavaliado", 
+          "MVP aprovado pelos stakeholders",
+          "Testes de Segurança de LLM (Jailbreak / Prompt Injection / Red Teaming)",
+          "Avaliação de Viés (Fairness) e Toxicidade aprovada"
+        ];
+      } else if (project.gate === "G2") {
+        checklists = [
+          "Testes de Carga / Stress concluídos", 
+          "Políticas de Segurança e LGPD aplicadas no pipeline de CI/CD",
+          "Ferramentas de Observabilidade Ativas (Detecção de Data Drift e Model Drift)",
+          "Definição de SLA e Matriz de Escalonamento de Incidentes de IA",
+          "Mecanismo de Kill-switch (Plano de Rollback) documentado"
+        ];
+      }
+      
+      setChecklistValues({});
+      setEvidenceValues({});
+      setTransitionDialog({
+        open: true,
+        projectId: project.id,
+        nextGate: nextGate.id,
+        gateTitle: nextGate.title,
+        checklists
+      });
+      return;
+    }
+
+    executeMove(project.id, nextGate.id, []);
+  };
+
+  const executeMove = async (id: number, gate: string, checkedItems: {itemText: string, evidenceLink?: string}[] = []) => {
+    try {
+      if (checkedItems.length > 0) {
+        // Envia as respostas para o banco para fins de auditoria
+        await submitChecklist.mutateAsync({
+          projectId: id,
+          gate: gate as any,
+          items: checkedItems
+        });
+      }
+      
+      await updateGate.mutateAsync({ id, gate: gate as any });
+      toast.success(`Projeto movido para ${gate}`);
+      utils.aiPipeline.list.invalidate();
+      setTransitionDialog({ open: false, projectId: 0, nextGate: "", gateTitle: "", checklists: [] });
+    } catch(err: any) {
+      toast.error(err.message || "Erro ao mover card");
+    }
+  };
+
+  const handleGoNoGo = async (id: number, status: "go" | "no_go") => {
+    try {
+      await updateGoNoGo.mutateAsync({ id, status });
+      toast.success(`Business Case avaliado como ${status.toUpperCase()}`);
+      utils.aiPipeline.list.invalidate();
+      utils.aiPipeline.metrics.invalidate();
+    } catch(err: any) {
+      toast.error(err.message);
+    }
   };
 
   if (isLoading) return <div className="p-6">Carregando Pipeline...</div>;
@@ -59,13 +149,25 @@ export default function AIPipeline() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-[#1B3A8C] flex items-center gap-2">
-            <GitCommit className="w-6 h-6" /> Ciclo de Vida de IA (Pipeline)
+            <GitCommit className="w-6 h-6" /> Ciclo de Vida de IA (Pipeline & Governança)
           </h1>
-          <p className="text-gray-500">Gestão de aprovações (Gates) e fluxo de valor dos projetos de IA.</p>
+          <p className="text-gray-500">Gestão de aprovações de Intake, ServiceNow, Go/No-Go e Azure DevOps.</p>
         </div>
-        <Button onClick={() => setShowIntake(true)} className="bg-[#1B3A8C] gap-2">
-          <Plus className="w-4 h-4" /> Novo Intake
-        </Button>
+        <div className="flex gap-4 items-center">
+          {metrics && (
+            <div className="flex bg-white shadow-sm border rounded-lg overflow-hidden text-sm mr-4">
+              <div className="px-3 py-2 bg-gray-50 border-r flex items-center gap-2 font-medium">
+                <Activity className="w-4 h-4 text-gray-500" /> Intake
+              </div>
+              <div className="px-3 py-2 border-r">Avaliados: <span className="font-bold">{metrics.evaluated}</span></div>
+              <div className="px-3 py-2 border-r text-green-700">Go: <span className="font-bold">{metrics.approvedPercentage}%</span></div>
+              <div className="px-3 py-2 text-red-700">No-Go: <span className="font-bold">{metrics.rejectedPercentage}%</span></div>
+            </div>
+          )}
+          <Button onClick={() => setShowIntake(true)} className="bg-[#1B3A8C] gap-2">
+            <Plus className="w-4 h-4" /> Novo Intake Formal
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-start">
@@ -82,28 +184,53 @@ export default function AIPipeline() {
                 <Card key={project.id} className="shadow-sm border-gray-200">
                   <CardContent className="p-4 space-y-3">
                     <div className="flex justify-between items-start">
-                      <h4 className="font-semibold text-sm line-clamp-2">{project.name}</h4>
+                      <h4 className="font-semibold text-sm line-clamp-2 pr-2">{project.name}</h4>
                       <Badge variant={project.riskLevel === 'alto' || project.riskLevel === 'critico' ? 'destructive' : 'secondary'}>
-                        Risco: {project.riskLevel}
+                        {project.riskLevel}
                       </Badge>
                     </div>
-                    <p className="text-xs text-gray-500 line-clamp-3">{project.description}</p>
-                    <div className="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded inline-block">
-                      Dept: {project.department || "Não informado"}
-                    </div>
+
+                    {(project.servicenowTicket || project.azureDevopsUrl) && (
+                      <div className="flex gap-2 text-xs">
+                        {project.servicenowTicket && (
+                          <a href="#" className="flex items-center gap-1 text-blue-600 hover:underline"><ExternalLink className="w-3 h-3"/> SNOW: {project.servicenowTicket}</a>
+                        )}
+                        {project.azureDevopsUrl && (
+                          <a href={project.azureDevopsUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-purple-600 hover:underline"><ExternalLink className="w-3 h-3"/> DevOps</a>
+                        )}
+                      </div>
+                    )}
+                    
+                    <p className="text-xs text-gray-500 line-clamp-2">{project.description}</p>
+                    
+                    {gate.id === "G0" && (
+                      <div className="pt-2 border-t flex flex-col gap-2">
+                        <div className="text-xs font-medium text-gray-700">Business Case (Go/No-go):</div>
+                        {project.goNoGoStatus === "pending" ? (
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="outline" className="flex-1 border-green-200 text-green-700 hover:bg-green-50" onClick={() => handleGoNoGo(project.id, "go")}><CheckCircle2 className="w-3 h-3 mr-1" /> GO</Button>
+                            <Button size="sm" variant="outline" className="flex-1 border-red-200 text-red-700 hover:bg-red-50" onClick={() => handleGoNoGo(project.id, "no_go")}><XCircle className="w-3 h-3 mr-1" /> NO-GO</Button>
+                          </div>
+                        ) : (
+                          <div className={`text-xs px-2 py-1 rounded font-bold text-center ${project.goNoGoStatus === 'go' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                            {project.goNoGoStatus === 'go' ? 'APROVADO (GO)' : 'REJEITADO (NO-GO)'}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     
                     <div className="flex justify-between items-center pt-2 border-t mt-2">
                       <Button 
                         size="icon" variant="ghost" className="h-6 w-6" 
                         disabled={gate.id === "G0"}
-                        onClick={() => handleMove(project.id, project.gate, "prev")}
+                        onClick={() => attemptMove(project, "prev")}
                       >
                         <ArrowLeft className="w-3 h-3" />
                       </Button>
                       <Button 
                         size="icon" variant="ghost" className="h-6 w-6"
                         disabled={gate.id === "G3"}
-                        onClick={() => handleMove(project.id, project.gate, "next")}
+                        onClick={() => attemptMove(project, "next")}
                       >
                         <ArrowRight className="w-3 h-3" />
                       </Button>
@@ -113,7 +240,7 @@ export default function AIPipeline() {
               ))}
               
               {columnProjects.length === 0 && (
-                <div className="text-sm text-gray-400 text-center py-10">Nenhum projeto nesta fase</div>
+                <div className="text-sm text-gray-400 text-center py-10">Nenhum projeto</div>
               )}
             </div>
           )
@@ -121,42 +248,122 @@ export default function AIPipeline() {
       </div>
 
       <Dialog open={showIntake} onOpenChange={setShowIntake}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Novo Projeto de IA (Intake)</DialogTitle>
-            <DialogDescription>Preencha os dados básicos para iniciar o fluxo de governança no G0.</DialogDescription>
+            <DialogTitle>Novo Projeto de IA (Intake ServiceNow Formal)</DialogTitle>
+            <DialogDescription>Preencha os dados básicos para iniciar a governança e o fluxo de Business Case no G0.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div>
+          <div className="grid grid-cols-2 gap-4 py-4">
+            <div className="col-span-2">
               <Label>Nome do Projeto / Caso de Uso</Label>
               <Input value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))} />
             </div>
-            <div>
-              <Label>Descrição / Objetivo</Label>
-              <Textarea rows={3} value={form.description} onChange={e => setForm(f => ({...f, description: e.target.value}))} />
+            <div className="col-span-2">
+              <Label>Descrição / Objetivo de Negócio</Label>
+              <Textarea rows={2} value={form.description} onChange={e => setForm(f => ({...f, description: e.target.value}))} />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label>Departamento / Área Solicitante</Label>
+              <Input value={form.department} onChange={e => setForm(f => ({...f, department: e.target.value}))} />
+            </div>
+            <div>
+              <Label>Impacto (Risco Estimado)</Label>
+              <Select value={form.riskLevel} onValueChange={v => setForm(f => ({...f, riskLevel: v as any}))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="baixo">Baixo</SelectItem>
+                  <SelectItem value="medio">Médio</SelectItem>
+                  <SelectItem value="alto">Alto</SelectItem>
+                  <SelectItem value="critico">Crítico</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="col-span-2 border-t pt-4 mt-2 grid grid-cols-2 gap-4">
               <div>
-                <Label>Departamento</Label>
-                <Input value={form.department} onChange={e => setForm(f => ({...f, department: e.target.value}))} />
+                <Label>ServiceNow Ticket ID (Origem)</Label>
+                <Input placeholder="REQ123456" value={form.servicenowTicket} onChange={e => setForm(f => ({...f, servicenowTicket: e.target.value}))} />
               </div>
               <div>
-                <Label>Impacto (Risco Estimado)</Label>
-                <Select value={form.riskLevel} onValueChange={v => setForm(f => ({...f, riskLevel: v as any}))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="baixo">Baixo</SelectItem>
-                    <SelectItem value="medio">Médio</SelectItem>
-                    <SelectItem value="alto">Alto</SelectItem>
-                    <SelectItem value="critico">Crítico</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label>URL do Azure DevOps (Hub Central)</Label>
+                <Input placeholder="https://dev.azure.com/..." value={form.azureDevopsUrl} onChange={e => setForm(f => ({...f, azureDevopsUrl: e.target.value}))} />
+              </div>
+            </div>
+
+            <div className="col-span-2 bg-gray-50 border p-3 rounded-lg flex gap-3 mt-4 items-start">
+              <Checkbox 
+                id="terms" 
+                checked={form.termsAccepted} 
+                onCheckedChange={checked => setForm(f => ({...f, termsAccepted: checked === true}))}
+                className="mt-1"
+              />
+              <div className="space-y-1 leading-none">
+                <label htmlFor="terms" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                  Aceite Digital das Políticas de IA
+                </label>
+                <p className="text-xs text-gray-500">
+                  Declaro que li e concordo com os Termos de Uso. Comprometo-me a utilizar 
+                  apenas ferramentas homologadas (ex: Python, Copilot Studio) e seguir os ritos de 
+                  segurança exigidos para o desenvolvimento deste modelo.
+                </p>
               </div>
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowIntake(false)}>Cancelar</Button>
-            <Button onClick={handleCreate} disabled={createProject.isPending} className="bg-[#1B3A8C]">Criar Intake</Button>
+            <Button onClick={handleCreate} disabled={createProject.isPending || !form.termsAccepted} className="bg-[#1B3A8C]">Gerar Intake (Business Case)</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={transitionDialog.open} onOpenChange={(val) => !val && setTransitionDialog(prev => ({...prev, open: false}))}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Aprovação de Transição: {transitionDialog.gateTitle}</DialogTitle>
+            <DialogDescription>
+              Para avançar de fase, é necessário confirmar que os seguintes critérios do checklist de governança foram atendidos.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+            {transitionDialog.checklists.map((check, idx) => (
+              <div key={idx} className={`flex flex-col space-y-2 border p-3 rounded transition-colors ${checklistValues[idx] ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+                <div className="flex items-start space-x-2">
+                  <Checkbox 
+                    id={`chk-${idx}`} 
+                    checked={checklistValues[idx] || false}
+                    onCheckedChange={val => setChecklistValues(prev => ({...prev, [idx]: val === true}))}
+                    className="data-[state=checked]:bg-green-600 data-[state=checked]:border-green-600 data-[state=checked]:text-white h-5 w-5 mt-0.5"
+                  />
+                  <label htmlFor={`chk-${idx}`} className={`text-sm font-medium leading-tight cursor-pointer ${checklistValues[idx] ? 'text-green-800' : 'text-gray-700'}`}>
+                    {check}
+                  </label>
+                </div>
+                {checklistValues[idx] && (
+                  <div className="pl-7 pt-1">
+                    <Input 
+                      placeholder="Link da Evidência (ex: URL SharePoint, Relatório Azure, Ticket SNOW...)" 
+                      value={evidenceValues[idx] || ""}
+                      onChange={e => setEvidenceValues(prev => ({...prev, [idx]: e.target.value}))}
+                      className="bg-white text-xs h-8 border-green-200 focus-visible:ring-green-500"
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTransitionDialog(prev => ({...prev, open: false}))}>Cancelar</Button>
+            <Button 
+              disabled={transitionDialog.checklists.some((_, idx) => !checklistValues[idx])} 
+              onClick={() => executeMove(
+                transitionDialog.projectId, 
+                transitionDialog.nextGate, 
+                transitionDialog.checklists.map((c, i) => ({ itemText: c, evidenceLink: evidenceValues[i] }))
+              )}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              Aprovar e Avançar
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

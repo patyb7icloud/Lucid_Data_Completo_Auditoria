@@ -1172,11 +1172,29 @@ export const aiProjects = pgTable("ai_projects", {
   ownerId:         integer("owner_id"),
   riskLevel:       riskLevelEnum("risk_level").default("medio").notNull(),
   complianceScore: integer("compliance_score").default(0),
+  
+  servicenowTicket: varchar("servicenow_ticket", { length: 128 }),
+  azureDevopsUrl:   varchar("azure_devops_url", { length: 512 }),
+  termsAccepted:   boolean("terms_accepted").default(false).notNull(),
+  goNoGoStatus:    varchar("go_no_go_status", { length: 32 }).default("pending").notNull(),
+
   createdAt:       timestamp("created_at").defaultNow().notNull(),
   updatedAt:       timestamp("updated_at").defaultNow().notNull(),
 });
 export type AiProject = typeof aiProjects.$inferSelect;
 export type InsertAiProject = typeof aiProjects.$inferInsert;
+
+export const aiProjectChecklists = pgTable("ai_project_checklists", {
+  id:              serial("id").primaryKey(),
+  projectId:       integer("project_id").notNull(),
+  gate:            aiGateEnum("gate").notNull(),
+  itemText:        text("item_text").notNull(),
+  evidenceLink:    varchar("evidence_link", { length: 1024 }),
+  checkedAt:       timestamp("checked_at").defaultNow().notNull(),
+  checkedBy:       varchar("checked_by", { length: 256 }),
+});
+export type AiProjectChecklist = typeof aiProjectChecklists.$inferSelect;
+export type InsertAiProjectChecklist = typeof aiProjectChecklists.$inferInsert;
 
 // ─── AI Risk: Avaliações de Risco ─────────────────────────────────────────────
 export const aiRiskAssessments = pgTable("ai_risk_assessments", {
