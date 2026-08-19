@@ -68,6 +68,8 @@ export const dataSensitivityEnum = pgEnum("data_sensitivity",  ["publico", "inte
 export const intakeStatusEnum    = pgEnum("intake_status",     ["rascunho","submetido","em_triagem","aprovado_estrategico","aprovado_operacional","retornado","rejeitado","em_execucao","em_validacao","concluido"]);
 export const priorityTierEnum    = pgEnum("priority_tier",     ["P1", "P2", "P3", "P4"]);
 export const tagAppliesToEnum    = pgEnum("tag_applies_to",    ["table", "column", "both"]);
+export const aiGateEnum          = pgEnum("ai_gate",           ["G0", "G1", "G2", "G3"]);
+export const aiProjectStatusEnum = pgEnum("ai_project_status", ["active", "paused", "completed", "cancelled"]);
 
 // ─── Users (Auth) ────────────────────────────────────────────────────────────
 export const users = pgTable("users", {
@@ -1158,6 +1160,23 @@ export const mlPredictionLogs = pgTable("ml_prediction_logs", {
   createdAt:   timestamp("created_at").defaultNow().notNull(),
 });
 export type MlPredictionLog = typeof mlPredictionLogs.$inferSelect;
+
+// ─── AI Pipeline: Projetos de IA ──────────────────────────────────────────────
+export const aiProjects = pgTable("ai_projects", {
+  id:              serial("id").primaryKey(),
+  name:            varchar("name", { length: 256 }).notNull(),
+  description:     text("description"),
+  department:      varchar("department", { length: 128 }),
+  gate:            aiGateEnum("gate").default("G0").notNull(),
+  status:          aiProjectStatusEnum("status").default("active").notNull(),
+  ownerId:         integer("owner_id"),
+  riskLevel:       riskLevelEnum("risk_level").default("medio").notNull(),
+  complianceScore: integer("compliance_score").default(0),
+  createdAt:       timestamp("created_at").defaultNow().notNull(),
+  updatedAt:       timestamp("updated_at").defaultNow().notNull(),
+});
+export type AiProject = typeof aiProjects.$inferSelect;
+export type InsertAiProject = typeof aiProjects.$inferInsert;
 
 // ─── AI Risk: Avaliações de Risco ─────────────────────────────────────────────
 export const aiRiskAssessments = pgTable("ai_risk_assessments", {

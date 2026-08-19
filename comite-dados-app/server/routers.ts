@@ -56,6 +56,7 @@ import {
 import { parseSqlLineage, parseDbtManifest } from "./lineageParser";
 import { mlopsRouter } from "./mlopsRouter";
 import { aiRiskRouter } from "./aiRiskRouter";
+import { aiPipelineRouter } from "./aiPipelineRouter";
 import { biConnectorsRouter } from "./biConnectorsRouter";
 import { hubRouter } from "./hubRouter";
 import { resolveDatabricksToken } from "./akvResolver";
@@ -4008,6 +4009,7 @@ export const appRouter = router({
   // ─── Lacunas Lucid Data Governance ───────────────────────────────────────────
   mlops: mlopsRouter,
   aiRisk: aiRiskRouter,
+  aiPipeline: aiPipelineRouter,
   biConnectors: biConnectorsRouter,
   auditoria: auditoriaRouter,
   hub: hubRouter,
