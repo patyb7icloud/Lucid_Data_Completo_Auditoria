@@ -460,6 +460,11 @@ export default function DataDictionary() {
                   </CardTitle>
                   <CardDescription className="text-xs">
                     Curadoria técnica de <span className="text-gray-900 font-bold">{selectedAsset?.name}</span>
+                    {selectedAsset?.description && (
+                      <p className="mt-1 text-gray-500 italic">
+                        {selectedAsset.description}
+                      </p>
+                    )}
                   </CardDescription>
                 </div>
                 <div className="relative w-full md:w-64">
