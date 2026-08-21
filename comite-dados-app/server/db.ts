@@ -1765,16 +1765,19 @@ export async function getQualityRules(assetId: number) {
 export async function upsertQualityRule(data: InsertQualityRule) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  // Upsert simples: se já existe regra desse tipo para esse ativo e coluna, atualiza. Senão insere.
-  return db.insert(qualityRules).values(data).onConflictDoUpdate({
-    target: [qualityRules.assetId],
-    set: {
-      threshold: data.threshold,
-      params: data.params,
-      customPattern: data.customPattern,
-      isActive: data.isActive
-    }
-  });
+  
+  // Custom conflict target based on dimension and scope (asset/domain)
+  // For simplicity, we just delete existing rules for this asset+dimension and insert the new one
+  if (data.assetId && data.dimensionId) {
+    await db.delete(qualityRules).where(
+      and(
+        eq(qualityRules.assetId, data.assetId),
+        eq(qualityRules.dimensionId, data.dimensionId)
+      )
+    );
+  }
+
+  return db.insert(qualityRules).values(data);
 }
 
 // ─── Access Requests (Fila de Aprovação) ────────────────────────────────────

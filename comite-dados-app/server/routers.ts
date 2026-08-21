@@ -1,4 +1,6 @@
 import { appRouter as auditoriaRouter } from "./auditoria/api/auditoriaRouter";
+import { qualityDimensions } from "../drizzle/schema.js";
+
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import { COOKIE_NAME } from "@shared/const";
@@ -1810,16 +1812,21 @@ Inclua apenas as tags que fazem sentido para o ativo. Use somente valores que es
       };
     }),
 
+  getQualityDimensions: publicProcedure.query(() => 
+    db.getDb().then(d => d ? d.select().from(qualityDimensions).orderBy(qualityDimensions.id) : [])
+  ),
+  
   getQualityRules: publicProcedure.input(z.object({ assetId: z.number() })).query(({ input }) =>
     db.getQualityRules(input.assetId)
   ),
   updateQualityRule: protectedProcedure.input(z.object({
-    assetId: z.number(),
-    ruleType: z.enum(['completude', 'unicidade', 'validade', 'consistencia', 'regex']),
+    dimensionId: z.number(),
+    assetId: z.number().optional(),
+    domainId: z.number().optional(),
+    isGlobal: z.boolean().default(false),
     threshold: z.number(),
-    columnName: z.string().optional(),
-    params: z.string().optional(),
-    customPattern: z.string().optional(),
+    expressionJson: z.any().optional(),
+    isActive: z.boolean().default(true),
   })).mutation(({ input }) => db.upsertQualityRule(input)),
 
   runChecks: protectedProcedure.input(z.object({ assetId: z.number() })).mutation(async ({ input }) => {

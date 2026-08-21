@@ -41,6 +41,8 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -58,17 +60,10 @@ export default function DataQuality() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<any>(null);
-  const [isRegexOpen, setIsRegexOpen] = useState(false);
   const [historyAssetId, setHistoryAssetId] = useState<number | null>(null);
   
-  // Regras temporárias para o modal
-  const [compThreshold, setCompThreshold] = useState(95);
-  const [uniqThreshold, setUniqThreshold] = useState(100);
-
-  // Regex rules
-  const [regexColumn, setRegexColumn] = useState("");
-  const [regexPattern, setRegexPattern] = useState("");
-  const [regexThreshold, setRegexThreshold] = useState(99);
+  // Regras Dinâmicas (Mapeia dimensionId -> { threshold, json })
+  const [draftRules, setDraftRules] = useState<Record<number, { threshold: number, json: string }>>({});
 
   const utils = trpc.useContext();
   const { data: assets, refetch: refetchAssets } = trpc.governance.listAssets.useQuery({});
@@ -81,6 +76,10 @@ export default function DataQuality() {
     { enabled: !!historyAssetId }
   );
   const { data: globalDimensions } = trpc.governance.getGlobalQualityDimensions.useQuery();
+  const { data: assetAttributes } = trpc.governance.getAttributes.useQuery(
+    { assetId: selectedAsset?.id ?? 0 },
+    { enabled: !!selectedAsset }
+  );
 
   const [isGlobalScanRunning, setIsGlobalScanRunning] = useState(false);
   const [runningAssetId, setRunningAssetId] = useState<number | null>(null);
@@ -166,11 +165,6 @@ export default function DataQuality() {
 
   const handleOpenConfig = (asset: any) => {
     setSelectedAsset(asset);
-    
-    // Reset or load from existingRules
-    setCompThreshold(95);
-    setUniqThreshold(100);
-    
     setIsConfigOpen(true);
   };
 
@@ -180,56 +174,41 @@ export default function DataQuality() {
 
   useEffect(() => {
     if (existingRules) {
-      const compRule = existingRules.find(r => r.ruleType === 'completude');
-      const uniqRule = existingRules.find(r => r.ruleType === 'unicidade');
-      const regexRule = existingRules.find(r => r.ruleType === 'regex');
-
-      if (compRule) setCompThreshold(compRule.threshold ?? 95);
-      if (uniqRule) setUniqThreshold(uniqRule.threshold ?? 100);
-      if (regexRule) {
-        setRegexColumn(regexRule.columnName || "");
-        setRegexPattern(regexRule.customPattern || "");
-        setRegexThreshold(regexRule.threshold ?? 99);
-      }
+      const draft: Record<number, { threshold: number, json: string }> = {};
+      existingRules.forEach(r => {
+        draft[r.dimensionId] = {
+          threshold: r.threshold ?? 95,
+          json: r.expressionJson ? JSON.stringify(r.expressionJson) : ""
+        };
+      });
+      setDraftRules(draft);
     }
   }, [existingRules]);
 
   const handleSaveRules = async () => {
     if (!selectedAsset) return;
     
-    // Salva regra de completude
-    await updateRule.mutateAsync({
-      assetId: selectedAsset.id,
-      ruleType: 'completude',
-      threshold: compThreshold
-    });
+    for (const [dimId, data] of Object.entries(draftRules)) {
+      if (!data.json.trim()) continue; // pula regras sem json definido
+      
+      let exprJson = undefined;
+      try {
+        exprJson = JSON.parse(data.json);
+      } catch(e) {
+        toast.error(`JSON inválido na dimensão ID ${dimId}`);
+        return;
+      }
 
-    // Salva regra de unicidade
-    await updateRule.mutateAsync({
-      assetId: selectedAsset.id,
-      ruleType: 'unicidade',
-      threshold: uniqThreshold
-    });
-
-    setIsConfigOpen(false);
-  };
-
-  const handleSaveRegex = async () => {
-    if (!selectedAsset || !regexPattern || !regexColumn) return;
-
-    try {
       await updateRule.mutateAsync({
         assetId: selectedAsset.id,
-        ruleType: 'regex',
-        columnName: regexColumn,
-        customPattern: regexPattern,
-        threshold: regexThreshold
+        dimensionId: Number(dimId),
+        threshold: data.threshold,
+        expressionJson: exprJson
       });
-      toast.success("Regra Regex salva com sucesso!");
-      setIsRegexOpen(false);
-    } catch (err) {
-      toast.error("Erro ao salvar regra Regex");
     }
+
+    toast.success("Regras salvas com sucesso!");
+    setIsConfigOpen(false);
   };
 
   return (
@@ -448,74 +427,281 @@ export default function DataQuality() {
           </DialogHeader>
           
           <div className="space-y-6 py-4">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100 group">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-blue-100 rounded-lg text-blue-700">
-                    <CheckCircle2 className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-bold text-gray-800">Completude Mínima</p>
-                    <p className="text-[10px] text-gray-500">Mínimo aceitável de campos preenchidos.</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Input 
-                    type="number" 
-                    value={compThreshold} 
-                    onChange={(e) => setCompThreshold(Number(e.target.value))}
-                    className="w-16 h-8 text-center font-bold border-gray-200" 
-                  />
-                  <span className="text-sm font-bold text-gray-400">%</span>
-                </div>
-              </div>
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+              {globalDimensions?.map((dim) => {
+                const draft = draftRules[dim.id] || { threshold: 95, json: "" };
+                
+                let checkedCols: string[] = [];
+                let uniqueCol = "";
+                let dateCol = "";
+                let regexCols: Record<string, string> = {};
+                let consCols: Record<string, {op: string, val: string}> = {};
 
-              <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100 group">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-green-100 rounded-lg text-green-700">
-                    <Layers className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-bold text-gray-800">Unicidade de Chave</p>
-                    <p className="text-[10px] text-gray-500">Meta de registros únicos para chaves primárias.</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Input 
-                    type="number" 
-                    value={uniqThreshold} 
-                    onChange={(e) => setUniqThreshold(Number(e.target.value))}
-                    className="w-16 h-8 text-center font-bold border-gray-200" 
-                  />
-                  <span className="text-sm font-bold text-gray-400">%</span>
-                </div>
-              </div>
+                if (draft.json) {
+                  try {
+                    const parsed = JSON.parse(draft.json);
+                    if (dim.metricName === "completude" && parsed.and && Array.isArray(parsed.and)) {
+                      checkedCols = parsed.and.filter((c: any) => c.operator === "isNotNull" && c.field).map((c: any) => c.field);
+                    }
+                    if (dim.metricName === "unicidade" && parsed.field && parsed.operator === "isUnique") {
+                      uniqueCol = parsed.field;
+                    }
+                    if (dim.metricName === "atualidade" && parsed.field && parsed.operator === "isDateColumn") {
+                      dateCol = parsed.field;
+                    }
+                    if (dim.metricName === "validade" && parsed.and && Array.isArray(parsed.and)) {
+                      parsed.and.forEach((c: any) => {
+                        if (c.operator === "regex" && c.field) regexCols[c.field] = c.value;
+                      });
+                    }
+                    if (dim.metricName === "consistencia" && parsed.and && Array.isArray(parsed.and)) {
+                      parsed.and.forEach((c: any) => {
+                        if (c.field && c.operator && c.value !== undefined) consCols[c.field] = { op: c.operator, val: c.value };
+                      });
+                    }
+                  } catch(e) {}
+                }
 
-              <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100 group">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-amber-100 rounded-lg text-amber-700">
-                    <Regex className="h-4 w-4" />
+                const toggleColumn = (colName: string, checked: boolean) => {
+                  let newCols = [...checkedCols];
+                  if (checked) {
+                    newCols.push(colName);
+                  } else {
+                    newCols = newCols.filter(c => c !== colName);
+                  }
+                  const newJson = newCols.length > 0 ? JSON.stringify({
+                    and: newCols.map(c => ({ field: c, operator: "isNotNull" }))
+                  }, null, 2) : "";
+                  setDraftRules({ ...draftRules, [dim.id]: { ...draft, json: newJson }});
+                };
+
+                const setUniqueCol = (col: string) => {
+                  const newJson = col && col !== "none" ? JSON.stringify({ field: col, operator: "isUnique" }, null, 2) : "";
+                  setDraftRules({ ...draftRules, [dim.id]: { ...draft, json: newJson }});
+                };
+
+                const setDateCol = (col: string) => {
+                  const newJson = col && col !== "none" ? JSON.stringify({ field: col, operator: "isDateColumn" }, null, 2) : "";
+                  setDraftRules({ ...draftRules, [dim.id]: { ...draft, json: newJson }});
+                };
+
+                const setRegex = (col: string, val: string) => {
+                  const newCols = { ...regexCols };
+                  if (val && val !== "none") newCols[col] = val;
+                  else delete newCols[col];
+                  
+                  const entries = Object.entries(newCols);
+                  const newJson = entries.length > 0 ? JSON.stringify({
+                    and: entries.map(([f, v]) => ({ field: f, operator: "regex", value: v }))
+                  }, null, 2) : "";
+                  setDraftRules({ ...draftRules, [dim.id]: { ...draft, json: newJson }});
+                };
+
+                const setCons = (col: string, op: string, val: string) => {
+                  const newCols = { ...consCols };
+                  if (op && op !== "none" && val !== "") newCols[col] = { op, val };
+                  else delete newCols[col];
+                  
+                  const entries = Object.entries(newCols);
+                  const newJson = entries.length > 0 ? JSON.stringify({
+                    and: entries.map(([f, c]) => ({ field: f, operator: c.op, value: c.val }))
+                  }, null, 2) : "";
+                  setDraftRules({ ...draftRules, [dim.id]: { ...draft, json: newJson }});
+                };
+
+                return (
+                  <div key={dim.id} className="p-4 bg-gray-50 rounded-2xl border border-gray-100 group">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: dim.color || '#ccc' }} />
+                        <div>
+                          <p className="text-sm font-bold text-gray-800">{dim.name}</p>
+                          <p className="text-[10px] text-gray-500">{dim.description}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-gray-500">Threshold:</span>
+                        <Input 
+                          type="number" 
+                          value={draft.threshold} 
+                          onChange={(e) => setDraftRules({
+                            ...draftRules,
+                            [dim.id]: { ...draft, threshold: Number(e.target.value) }
+                          })}
+                          className="w-16 h-8 text-center font-bold border-gray-200" 
+                        />
+                        <span className="text-sm font-bold text-gray-400">%</span>
+                      </div>
+                    </div>
+                    
+                    <div className="mt-4">
+                        <Tabs defaultValue="visual" className="w-full">
+                          <TabsList className="grid w-full grid-cols-2 mb-4 bg-gray-100/50">
+                            <TabsTrigger value="visual" className="text-xs font-bold">Construtor Visual</TabsTrigger>
+                            <TabsTrigger value="json" className="text-xs font-bold">JSON Avançado</TabsTrigger>
+                          </TabsList>
+                          
+                          <TabsContent value="visual" className="space-y-4">
+                             {dim.metricName === "completude" && (
+                               <div className="grid grid-cols-2 gap-3 max-h-48 overflow-y-auto p-4 bg-white rounded-lg border border-gray-200 shadow-inner">
+                                  {assetAttributes?.map(attr => (
+                                    <div key={attr.id} className="flex items-center space-x-2">
+                                      <Checkbox 
+                                        id={`col-${dim.id}-${attr.id}`}
+                                        checked={checkedCols.includes(attr.name)}
+                                        onCheckedChange={(c) => toggleColumn(attr.name, !!c)}
+                                      />
+                                      <label htmlFor={`col-${dim.id}-${attr.id}`} className="text-sm font-medium leading-none cursor-pointer text-gray-700 truncate">
+                                        {attr.name} <span className="text-[10px] text-gray-400 font-mono">({attr.dataType})</span>
+                                      </label>
+                                    </div>
+                                  ))}
+                                  {!assetAttributes?.length && (
+                                    <div className="col-span-2 text-xs text-gray-500 text-center py-4">Nenhuma coluna detectada neste ativo. Sincronize o catálogo.</div>
+                                  )}
+                                  <div className="col-span-2 mt-2">
+                                    <p className="text-xs text-gray-500 italic">Marque as colunas que são obrigatórias (não podem ser nulas) de acordo com a regra de negócio.</p>
+                                  </div>
+                               </div>
+                             )}
+
+                             {dim.metricName === "unicidade" && (
+                               <div className="space-y-3 p-4 bg-white rounded-lg border border-gray-200 shadow-inner">
+                                 <p className="text-xs text-gray-500 font-medium">Selecione a coluna que atua como chave primária ou que não deve conter valores duplicados.</p>
+                                 <Select value={uniqueCol || "none"} onValueChange={setUniqueCol}>
+                                   <SelectTrigger className="w-full text-xs h-9">
+                                     <SelectValue placeholder="Selecione uma coluna..." />
+                                   </SelectTrigger>
+                                   <SelectContent>
+                                     <SelectItem value="none">Nenhuma</SelectItem>
+                                     {assetAttributes?.map(attr => (
+                                        <SelectItem key={attr.id} value={attr.name}>{attr.name} <span className="text-gray-400">({attr.dataType})</span></SelectItem>
+                                     ))}
+                                   </SelectContent>
+                                 </Select>
+                               </div>
+                             )}
+
+                             {dim.metricName === "atualidade" && (
+                               <div className="space-y-3 p-4 bg-white rounded-lg border border-gray-200 shadow-inner">
+                                 <p className="text-xs text-gray-500 font-medium">Selecione a coluna de data (timestamp) que indica a última modificação do registro.</p>
+                                 <Select value={dateCol || "none"} onValueChange={setDateCol}>
+                                   <SelectTrigger className="w-full text-xs h-9">
+                                     <SelectValue placeholder="Selecione uma coluna de data..." />
+                                   </SelectTrigger>
+                                   <SelectContent>
+                                     <SelectItem value="none">Nenhuma</SelectItem>
+                                     {assetAttributes?.filter(a => a.dataType.toLowerCase().includes('date') || a.dataType.toLowerCase().includes('time') || a.dataType.toLowerCase().includes('timestamp')).map(attr => (
+                                        <SelectItem key={attr.id} value={attr.name}>{attr.name} <span className="text-gray-400">({attr.dataType})</span></SelectItem>
+                                     ))}
+                                   </SelectContent>
+                                 </Select>
+                               </div>
+                             )}
+
+                             {dim.metricName === "validade" && (
+                               <div className="space-y-3 p-4 bg-white rounded-lg border border-gray-200 shadow-inner">
+                                 <p className="text-xs text-gray-500 font-medium">Defina um formato válido (Regex) para colunas específicas (ex: e-mail, CPF, CNPJ).</p>
+                                 <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
+                                   {assetAttributes?.map(attr => {
+                                      const isCustom = regexCols[attr.name] && !["^.+@.+$", "^\\d{11}$", "^\\d{14}$"].includes(regexCols[attr.name]);
+                                      const dropdownValue = regexCols[attr.name] ? (isCustom ? "custom" : regexCols[attr.name]) : "none";
+                                      
+                                      return (
+                                        <div key={attr.id} className="flex gap-2 items-center bg-gray-50 p-2 rounded-md border border-gray-100">
+                                           <span className="text-xs font-bold w-1/3 truncate text-gray-700" title={attr.name}>{attr.name}</span>
+                                           <Select value={dropdownValue} onValueChange={(v) => {
+                                              if (v === "custom") setRegex(attr.name, "."); // placeholder para custom
+                                              else setRegex(attr.name, v);
+                                           }}>
+                                              <SelectTrigger className="w-1/3 h-8 text-[10px] bg-white"><SelectValue placeholder="Padrão..." /></SelectTrigger>
+                                              <SelectContent>
+                                                <SelectItem value="none">Nenhum</SelectItem>
+                                                <SelectItem value="^.+@.+$">E-mail</SelectItem>
+                                                <SelectItem value="^\d{11}$">CPF (11 dígitos)</SelectItem>
+                                                <SelectItem value="^\d{14}$">CNPJ (14 dígitos)</SelectItem>
+                                                <SelectItem value="custom">Customizado...</SelectItem>
+                                              </SelectContent>
+                                           </Select>
+                                           <Input 
+                                              className="h-8 text-[10px] flex-1 bg-white" 
+                                              placeholder="Regex custom..." 
+                                              value={regexCols[attr.name] || ""} 
+                                              onChange={(e) => setRegex(attr.name, e.target.value)} 
+                                              disabled={dropdownValue !== "custom"}
+                                           />
+                                        </div>
+                                      )
+                                   })}
+                                   {!assetAttributes?.length && (
+                                     <div className="text-xs text-gray-500 text-center py-4">Nenhuma coluna detectada neste ativo.</div>
+                                   )}
+                                 </div>
+                               </div>
+                             )}
+
+                             {dim.metricName === "consistencia" && (
+                               <div className="space-y-3 p-4 bg-white rounded-lg border border-gray-200 shadow-inner">
+                                 <p className="text-xs text-gray-500 font-medium">Defina limites numéricos para colunas.</p>
+                                 <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
+                                   {assetAttributes?.filter(a => a.dataType.toLowerCase().includes('int') || a.dataType.toLowerCase().includes('float') || a.dataType.toLowerCase().includes('numeric') || a.dataType.toLowerCase().includes('decimal')).map(attr => (
+                                      <div key={attr.id} className="flex gap-2 items-center bg-gray-50 p-2 rounded-md border border-gray-100">
+                                         <span className="text-xs font-bold w-1/3 truncate text-gray-700" title={attr.name}>{attr.name}</span>
+                                         <Select value={consCols[attr.name]?.op || "none"} onValueChange={(v) => setCons(attr.name, v, consCols[attr.name]?.val || "0")}>
+                                            <SelectTrigger className="w-1/3 h-8 text-[10px] bg-white"><SelectValue placeholder="Regra..." /></SelectTrigger>
+                                            <SelectContent>
+                                              <SelectItem value="none">Nenhuma</SelectItem>
+                                              <SelectItem value="greaterThan">&gt; Maior que</SelectItem>
+                                              <SelectItem value="lessThan">&lt; Menor que</SelectItem>
+                                              <SelectItem value="equals">= Igual a</SelectItem>
+                                            </SelectContent>
+                                         </Select>
+                                         <Input 
+                                            type="number"
+                                            className="h-8 text-[10px] flex-1 bg-white" 
+                                            placeholder="Valor..." 
+                                            value={consCols[attr.name]?.val || ""} 
+                                            onChange={(e) => setCons(attr.name, consCols[attr.name]?.op || "greaterThan", e.target.value)} 
+                                            disabled={!consCols[attr.name]?.op || consCols[attr.name]?.op === "none"}
+                                         />
+                                      </div>
+                                   ))}
+                                   {!assetAttributes?.filter(a => a.dataType.toLowerCase().includes('int') || a.dataType.toLowerCase().includes('float') || a.dataType.toLowerCase().includes('numeric') || a.dataType.toLowerCase().includes('decimal'))?.length && (
+                                     <div className="text-xs text-gray-500 text-center py-4">Nenhuma coluna numérica detectada neste ativo.</div>
+                                   )}
+                                 </div>
+                               </div>
+                             )}
+                          </TabsContent>
+                          
+                          <TabsContent value="json">
+                            <div className="mt-2 space-y-2">
+                              <label className="text-[10px] font-bold uppercase text-gray-400 flex items-center gap-2">
+                                Condição JSON (Regra Engine)
+                                <Info className="h-3 w-3 text-blue-500 cursor-help" title={'Ex: {"field":"description", "operator":"isNotNull"}'} />
+                              </label>
+                              <textarea
+                                className="w-full text-xs font-mono p-2 border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 min-h-[60px]"
+                                placeholder={'{"field": "isVerified", "operator": "isTrue"}'}
+                                value={draft.json}
+                                onChange={(e) => setDraftRules({
+                                    ...draftRules,
+                                    [dim.id]: { ...draft, json: e.target.value }
+                                })}
+                              />
+                            </div>
+                          </TabsContent>
+                        </Tabs>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-bold text-gray-800">Validação Customizada (Regex)</p>
-                    <p className="text-[10px] text-gray-500">Padrão: {regexPattern || 'Nenhum'}</p>
-                  </div>
-                </div>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="text-blue-600 text-[10px] font-bold uppercase hover:bg-blue-50"
-                  onClick={() => setIsRegexOpen(true)}
-                >
-                  {regexPattern ? 'Editar Regex' : 'Configurar Regex'}
-                </Button>
-              </div>
+                );
+              })}
             </div>
 
             <div className="p-4 bg-blue-50/50 rounded-2xl border border-blue-100 flex gap-3">
               <Info className="h-5 w-5 text-blue-600 shrink-0" />
               <p className="text-[11px] text-blue-800 leading-relaxed">
-                <strong>Nota Técnica:</strong> O motor de qualidade do Lucid Data Governance utiliza estas metas para calcular o <strong>Quality Score</strong> exibido no Catálogo Principal.
+                <strong>Motor Dinâmico:</strong> Escreva a condição em JSON. Operadores suportados: isNotNull, isNull, isTrue, isFalse, regex, equals, notEquals.
               </p>
             </div>
           </div>
@@ -530,51 +716,6 @@ export default function DataQuality() {
               {updateRule.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Salvar Regras
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Modal de Regex */}
-      <Dialog open={isRegexOpen} onOpenChange={setIsRegexOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-[#1B3A8C]">
-              <Regex className="h-5 w-5" /> Expressão Regular
-            </DialogTitle>
-            <DialogDescription>
-              Valide formatos específicos (CPF, E-mail, SKU SAP) via Regex.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase text-gray-400">Coluna Alvo</label>
-              <Input 
-                placeholder="Ex: email_contato, cod_sap" 
-                value={regexColumn}
-                onChange={(e) => setRegexColumn(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase text-gray-400">Padrão Regex</label>
-              <Input 
-                placeholder="Ex: ^[a-z0-9]+@[a-z]+\.[a-z]{2,3}$" 
-                className="font-mono text-xs"
-                value={regexPattern}
-                onChange={(e) => setRegexPattern(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase text-gray-400">Threshold de Aceitação (%)</label>
-              <Input 
-                type="number"
-                value={regexThreshold}
-                onChange={(e) => setRegexThreshold(Number(e.target.value))}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setIsRegexOpen(false)}>Cancelar</Button>
-            <Button className="bg-blue-600" onClick={handleSaveRegex}>Aplicar Padrão</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

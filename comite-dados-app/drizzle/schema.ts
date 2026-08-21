@@ -510,15 +510,29 @@ export const dataQualityChecks = pgTable("data_quality_checks", {
 export type DataQualityCheck = typeof dataQualityChecks.$inferSelect;
 export type InsertDataQualityCheck = typeof dataQualityChecks.$inferInsert;
 
-// ─── Quality Rules (Configuração) ───────────────────────────────────────────
+// ─── Quality Dimensions ──────────────────────────────────────────────────────
+export const qualityDimensions = pgTable("quality_dimensions", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 128 }).notNull().unique(), // ex: "Completude"
+  description: text("description"),
+  color: varchar("color", { length: 32 }).default("#1B3A8C"),
+  weight: real("weight").default(1),
+  isActive: boolean("isActive").default(true),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type QualityDimension = typeof qualityDimensions.$inferSelect;
+export type InsertQualityDimension = typeof qualityDimensions.$inferInsert;
+
+// ─── Quality Rules (Configuração Flexível) ──────────────────────────────────
 export const qualityRules = pgTable("quality_rules", {
   id: serial("id").primaryKey(),
-  assetId: integer("assetId").notNull(),
-  ruleType: qualityRuleTypeEnum("ruleType").notNull(),
-  columnName: varchar("columnName", { length: 128 }),
+  dimensionId: integer("dimensionId").notNull(),
+  assetId: integer("assetId"),
+  domainId: integer("domainId"),
+  isGlobal: boolean("isGlobal").default(false),
+  expressionJson: jsonb("expressionJson"),
   threshold: real("threshold").default(95),
-  params: text("params"),
-  customPattern: text("customPattern"),
   isActive: boolean("isActive").default(true),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
