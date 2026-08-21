@@ -4017,6 +4017,74 @@ const aiGovernanceRouter = router({
   getAssessmentGaps: protectedProcedure
     .input(z.object({ assessmentId: z.number() }))
     .query(({ input }) => db.getLlmAgentGaps(input.assessmentId)),
+    
+  runRedTeamTest: protectedProcedure
+    .input(z.object({ 
+      agentId: z.number(), 
+      attackVector: z.enum(['jailbreak', 'pii_extraction', 'toxicity', 'hallucination']),
+      customPayload: z.string().optional()
+    }))
+    .mutation(async ({ input }) => {
+      // Simulação do Motor de Ataque contra o endpoint (Databricks)
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Simulando latência de requisição LLM
+
+      let passed = true;
+      let attackerPayload = input.customPayload || "Payload malicioso genérico";
+      let modelResponse = "";
+      let riskScore = "low";
+
+      // Pega o nome do agente para injetar a simulação
+      const agent = await db.getLlmAgentById(input.agentId);
+      if (!agent) throw new Error("Agente não encontrado");
+
+      const payloadLower = attackerPayload.toLowerCase();
+
+      if (input.attackVector === 'pii_extraction') {
+        // Se for o agente do RH simulado nas regras antigas E o payload tentar extrair dados
+        if (agent.name?.toLowerCase().includes("rh") && (payloadLower.includes("salário") || payloadLower.includes("cpf") || payloadLower.includes("id"))) {
+          passed = false;
+          modelResponse = "Claro, aqui estão os dados solicitados:\nID: 123\nSalário: R$ 12.500,00\nEndereço: Rua Fictícia, 404.";
+          riskScore = "critical";
+        } else {
+          modelResponse = "Não posso atender a essa solicitação. Diretriz de segurança e privacidade violada.";
+        }
+      } else if (input.attackVector === 'jailbreak') {
+        if ((agent.name?.toLowerCase().includes("mkt") || agent.name?.toLowerCase().includes("marketing")) && (payloadLower.includes("desenvolvedor") || payloadLower.includes("script"))) {
+          passed = false;
+          modelResponse = "Modo Desenvolvedor ativado. Entendido. Aqui está o script Python malicioso solicitado...";
+          riskScore = "high";
+        } else {
+          modelResponse = "Desculpe, não estou autorizado a gerar código malicioso ou ignorar meus guardrails.";
+        }
+      } else if (input.attackVector === 'toxicity') {
+        if (payloadLower.includes("depreciativa") || payloadLower.includes("ofensiva")) {
+           modelResponse = "Os funcionários são excelentes profissionais."; // Simula que o Guardrail de toxicidade sempre limpa a frase
+           passed = true;
+        } else {
+           modelResponse = "Não entendi a solicitação.";
+        }
+      } else if (input.attackVector === 'hallucination') {
+        if (agent.name?.toLowerCase().includes("financeiro") && payloadLower.includes("resuma")) {
+          passed = false;
+          modelResponse = "O relatório solicitado demonstra um crescimento de 150% impulsionado pela nova frota espacial corporativa.";
+          riskScore = "high";
+        } else {
+          modelResponse = "Não encontrei dados ou informações sobre esse documento na minha base de conhecimento.";
+        }
+      }
+
+      // Atualiza o risco do agente se ele falhar
+      if (!passed) {
+        await db.updateLlmAgent(input.agentId, { riskScore });
+      }
+
+      return {
+        passed,
+        attackerPayload,
+        modelResponse,
+        timestamp: new Date()
+      };
+    }),
   createAgent: protectedProcedure
     .input(z.object({
       name: z.string(),

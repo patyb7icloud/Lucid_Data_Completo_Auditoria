@@ -104,6 +104,15 @@ const modelsRouter = router({
       return updated;
     }),
 
+  getFeatures: protectedProcedure
+    .input(z.object({
+      name: z.string(),
+      forceRefresh: z.boolean().optional()
+    }))
+    .query(async ({ input }) => {
+      return await databricksService.getModelFeaturesAndDrift(input.name, input.forceRefresh);
+    }),
+
   delete: protectedProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
@@ -228,8 +237,44 @@ const predictionLogsRouter = router({
     }),
 });
 
+// ─── FinOps Router (AI Consumption) ──────────────────────────────────────────
+const finopsRouter = router({
+  summary: publicProcedure.query(async () => {
+    return {
+      totalTokens: 1250000,
+      estimatedCostUSD: 45.50,
+      totalRequests: 850,
+      activeAgents: 4,
+    };
+  }),
+  byAgent: publicProcedure.query(async () => {
+    return [
+      { name: "Agente de RH", tokens: 450000, costUSD: 15.00 },
+      { name: "Agente de Marketing", tokens: 600000, costUSD: 25.50 },
+      { name: "Agente Financeiro", tokens: 150000, costUSD: 4.00 },
+      { name: "Assistente de TI", tokens: 50000, costUSD: 1.00 },
+    ];
+  }),
+  byUser: publicProcedure.query(async () => {
+    return [
+      { id: "U001", name: "Ana Clara", department: "Marketing", tokens: 320000, costUSD: 14.50 },
+      { id: "U002", name: "Carlos Eduardo", department: "RH", tokens: 210000, costUSD: 7.20 },
+      { id: "U003", name: "Mariana Silva", department: "Financeiro", tokens: 180000, costUSD: 5.80 },
+      { id: "U004", name: "João Pedro", department: "TI", tokens: 110000, costUSD: 3.00 },
+      { id: "U005", name: "Fernanda Costa", department: "Diretoria", tokens: 80000, costUSD: 2.50 },
+    ];
+  }),
+  anomalies: publicProcedure.query(async () => {
+    return [
+      { id: 1, type: "spiking", message: "Pico de 150k tokens em 2h", agent: "Agente de Marketing", severity: "high", timestamp: new Date().toISOString() },
+      { id: 2, type: "unusual_user", message: "Usuário do Financeiro acessou Agente de TI 50x", agent: "Assistente de TI", severity: "medium", timestamp: new Date(Date.now() - 86400000).toISOString() },
+    ];
+  }),
+});
+
 export const mlopsRouter = router({
   models: modelsRouter,
   metrics: metricsRouter,
   predictionLogs: predictionLogsRouter,
+  finops: finopsRouter,
 });
