@@ -672,6 +672,8 @@ export const slaConfigs = pgTable("sla_configs", {
   minQualityScore: real("minQualityScore").default(70),
   maxAccessResponseDays: integer("maxAccessResponseDays").default(5),
   alertEmails: text("alertEmails"),
+  webhookUrl: text("webhookUrl"),
+  severity: text("severity").default("medium"),
   alertOnBreachOnly: boolean("alertOnBreachOnly").default(true),
   active: boolean("active").notNull().default(true),
   createdById: integer("createdById"),
@@ -692,6 +694,8 @@ export const slaViolations = pgTable("sla_violations", {
   daysOverdue: integer("daysOverdue").default(0),
   notificationSent: boolean("notificationSent").default(false),
   details: jsonb("details"),
+  status: text("status").default("active"),
+  rootCause: text("rootCause"),
   resolvedAt: timestamp("resolvedAt"),
   detectedAt: timestamp("detectedAt").defaultNow().notNull(),
 });

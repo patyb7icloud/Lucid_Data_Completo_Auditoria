@@ -1,4 +1,4 @@
-import { eq, desc, asc, and, or, sql, count, isNotNull, isNull, gte, lte, getTableColumns, like } from "drizzle-orm";
+import { eq, desc, asc, and, or, sql, count, isNotNull, isNull, gte, lte, getTableColumns, like, not, ne } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
@@ -2140,8 +2140,8 @@ export async function getSlaViolations(opts?: { resolved?: boolean; entityType?:
   const db = await getDb();
   if (!db) return [];
   const conditions = [];
-  if (opts?.resolved === false) conditions.push(isNull(slaViolations.resolvedAt));
-  if (opts?.resolved === true) conditions.push(isNotNull(slaViolations.resolvedAt));
+  if (opts?.resolved === false) conditions.push(not(eq(slaViolations.status, 'resolved')));
+  if (opts?.resolved === true) conditions.push(eq(slaViolations.status, 'resolved'));
   if (opts?.entityType) conditions.push(eq(slaViolations.entityType, opts.entityType as any));
   const q = db.select().from(slaViolations).orderBy(desc(slaViolations.detectedAt))
     .limit(opts?.limit ?? 100).offset(opts?.offset ?? 0);
@@ -2157,7 +2157,16 @@ export async function createSlaViolation(data: Omit<InsertSlaViolation, 'id' | '
 export async function resolveSlaViolation(id: number) {
   const db = await getDb();
   if (!db) return;
-  return db.update(slaViolations).set({ resolvedAt: new Date() }).where(eq(slaViolations.id, id));
+  return db.update(slaViolations).set({ status: 'resolved', resolvedAt: new Date() }).where(eq(slaViolations.id, id));
+}
+
+export async function updateSlaViolation(id: number, data: Partial<InsertSlaViolation>) {
+  const db = await getDb();
+  if (!db) return;
+  if (data.status === 'resolved' && !data.resolvedAt) {
+    data.resolvedAt = new Date();
+  }
+  return db.update(slaViolations).set(data).where(eq(slaViolations.id, id));
 }
 
 // ─── Global Quality Dimensions (agregação por métrica) ───────────────────────

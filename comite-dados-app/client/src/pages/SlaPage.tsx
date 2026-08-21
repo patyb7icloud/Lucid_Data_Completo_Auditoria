@@ -22,8 +22,9 @@ interface SlaConfig {
   entityId?: number | null;
   maxUpdateDays?: number | null;
   minQualityScore?: number | null;
-  maxAccessResponseDays?: number | null;
   alertEmails?: string | null;
+  webhookUrl?: string | null;
+  severity?: string | null;
   alertOnBreachOnly?: boolean | null;
   active?: boolean | null;
 }
@@ -36,6 +37,8 @@ interface SlaViolation {
   entityName?: string | null;
   violationType: string;
   daysOverdue?: number | null;
+  status?: string | null;
+  rootCause?: string | null;
   resolvedAt?: string | null;
   detectedAt: string;
 }
@@ -57,9 +60,12 @@ function SlaConfigDialog({ open, onClose, config, onSaved }: {
   const createMut = trpc.sla.createConfig.useMutation({ onSuccess: () => { utils.sla.listConfigs.invalidate(); onSaved(); } });
   const updateMut = trpc.sla.updateConfig.useMutation({ onSuccess: () => { utils.sla.listConfigs.invalidate(); onSaved(); } });
 
+  const { data: domains = [] } = trpc.domains.list.useQuery();
+  const { data: assets = [] } = trpc.governance.listAssets.useQuery({ limit: 500 });
+
   const [form, setForm] = useState<Partial<SlaConfig>>(config ?? {
     name: "", entityType: "global", maxUpdateDays: 30, minQualityScore: 70, maxAccessResponseDays: 5,
-    alertOnBreachOnly: true, active: true,
+    alertOnBreachOnly: true, active: true, severity: "medium", webhookUrl: ""
   });
 
   const set = (k: keyof SlaConfig, v: any) => setForm(f => ({ ...f, [k]: v }));
@@ -75,6 +81,8 @@ function SlaConfigDialog({ open, onClose, config, onSaved }: {
       minQualityScore: form.minQualityScore ?? 70,
       maxAccessResponseDays: form.maxAccessResponseDays ?? 5,
       alertEmails: form.alertEmails ?? undefined,
+      webhookUrl: form.webhookUrl ?? undefined,
+      severity: form.severity ?? "medium",
       alertOnBreachOnly: form.alertOnBreachOnly ?? true,
       active: form.active ?? true,
     };
@@ -111,7 +119,27 @@ function SlaConfigDialog({ open, onClose, config, onSaved }: {
             </div>
             <div className="space-y-1">
               <Label>ID da Entidade (se específico)</Label>
-              <Input type="number" placeholder="Opcional" value={form.entityId ?? ""} onChange={e => set("entityId", e.target.value ? Number(e.target.value) : null)} />
+              {form.entityType === "domain" ? (
+                <Select value={form.entityId ? form.entityId.toString() : ""} onValueChange={v => set("entityId", Number(v))}>
+                  <SelectTrigger><SelectValue placeholder="Selecione um domínio" /></SelectTrigger>
+                  <SelectContent>
+                    {domains.map(d => (
+                      <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : form.entityType === "asset" ? (
+                <Select value={form.entityId ? form.entityId.toString() : ""} onValueChange={v => set("entityId", Number(v))}>
+                  <SelectTrigger><SelectValue placeholder="Selecione um ativo" /></SelectTrigger>
+                  <SelectContent>
+                    {(assets as any[]).map(a => (
+                      <SelectItem key={a.id} value={a.id.toString()}>{a.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input type="number" placeholder="Opcional" value={form.entityId ?? ""} disabled className="bg-gray-50" />
+              )}
             </div>
           </div>
           <div className="grid grid-cols-3 gap-3">
@@ -128,9 +156,27 @@ function SlaConfigDialog({ open, onClose, config, onSaved }: {
               <Input type="number" min={1} max={90} value={form.maxAccessResponseDays ?? 5} onChange={e => set("maxAccessResponseDays", Number(e.target.value))} />
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>E-mails para alerta (separados por vírgula)</Label>
+              <Input placeholder="gestor@empresa.com" value={form.alertEmails ?? ""} onChange={e => set("alertEmails", e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label>Webhook para Integração (Slack/Teams)</Label>
+              <Input placeholder="https://hooks.slack.com/services/..." value={form.webhookUrl ?? ""} onChange={e => set("webhookUrl", e.target.value)} />
+            </div>
+          </div>
           <div className="space-y-1">
-            <Label>E-mails para alerta (separados por vírgula)</Label>
-            <Input placeholder="gestor@empresa.com, dpo@empresa.com" value={form.alertEmails ?? ""} onChange={e => set("alertEmails", e.target.value)} />
+            <Label>Criticidade (Severity)</Label>
+            <Select value={form.severity ?? "medium"} onValueChange={v => set("severity", v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="critical">Crítico (P1)</SelectItem>
+                <SelectItem value="high">Alto (P2)</SelectItem>
+                <SelectItem value="medium">Médio (P3)</SelectItem>
+                <SelectItem value="low">Baixo (P4)</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-2">
@@ -154,13 +200,74 @@ function SlaConfigDialog({ open, onClose, config, onSaved }: {
   );
 }
 
+// ─── Violation Dialog ───────────────────────────────────────────────────────────
+function ViolationDialog({ open, onClose, violation, onSaved }: {
+  open: boolean; onClose: () => void;
+  violation: SlaViolation | null;
+  onSaved: () => void;
+}) {
+  const utils = trpc.useUtils();
+  const updateMut = trpc.sla.updateViolationStatus.useMutation({ onSuccess: () => { utils.sla.listViolations.invalidate(); onSaved(); } });
+
+  const [form, setForm] = useState<{ status: string; rootCause: string }>({
+    status: violation?.status ?? "active",
+    rootCause: violation?.rootCause ?? ""
+  });
+
+  if (!violation) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Gerenciar Incidente (SLA)</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-1">
+            <Label>Status do Incidente</Label>
+            <Select value={form.status} onValueChange={v => setForm(f => ({ ...f, status: v }))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="active">Ativo (Aguardando ação)</SelectItem>
+                <SelectItem value="investigating">Em Investigação</SelectItem>
+                <SelectItem value="resolved">Resolvido</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label>Causa Raiz (Root Cause) {form.status === 'resolved' && '*'}</Label>
+            <textarea
+              className="w-full flex min-h-[80px] rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              placeholder="Descreva o que causou o incidente e como foi resolvido..."
+              value={form.rootCause}
+              onChange={e => setForm(f => ({ ...f, rootCause: e.target.value }))}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancelar</Button>
+          <Button 
+            onClick={() => updateMut.mutate({ id: violation.id, status: form.status, rootCause: form.rootCause })} 
+            disabled={updateMut.isPending || (form.status === 'resolved' && !form.rootCause)} 
+            className="bg-[#1B3A8C] hover:bg-[#1B3A8C]/90"
+          >
+            {updateMut.isPending ? "Salvando..." : "Salvar"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function SlaPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [violationDialogOpen, setViolationDialogOpen] = useState(false);
   const [editConfig, setEditConfig] = useState<SlaConfig | null>(null);
+  const [selectedViolation, setSelectedViolation] = useState<SlaViolation | null>(null);
   const [activeTab, setActiveTab] = useState<"configs" | "violations">("configs");
   const [showResolved, setShowResolved] = useState(false);
 
@@ -172,7 +279,7 @@ export default function SlaPage() {
   const deleteMut = trpc.sla.deleteConfig.useMutation({ onSuccess: () => utils.sla.listConfigs.invalidate() });
   const resolveMut = trpc.sla.resolveViolation.useMutation({ onSuccess: () => utils.sla.listViolations.invalidate() });
 
-  const activeViolations = (violations as any[]).filter((v: SlaViolation) => !v.resolvedAt).length;
+  const activeViolations = (violations as any[]).filter((v: SlaViolation) => v.status !== 'resolved').length;
 
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
@@ -257,6 +364,16 @@ export default function SlaPage() {
                       <div className="flex items-center gap-2 mb-1">
                         <h3 className="font-semibold">{c.name}</h3>
                         <Badge variant="outline" className="text-xs capitalize">{c.entityType}</Badge>
+                        {c.severity && (
+                          <Badge className={`text-xs ${
+                            c.severity === 'critical' ? 'bg-red-100 text-red-800' :
+                            c.severity === 'high' ? 'bg-orange-100 text-orange-800' :
+                            c.severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-blue-100 text-blue-800'
+                          }`}>
+                            {c.severity.toUpperCase()}
+                          </Badge>
+                        )}
                         {!c.active && <Badge variant="secondary" className="text-xs">Inativo</Badge>}
                       </div>
                       {c.description && <p className="text-sm text-muted-foreground mb-2">{c.description}</p>}
@@ -321,17 +438,32 @@ export default function SlaPage() {
                         <span className="text-xs text-muted-foreground">
                           {new Date(v.detectedAt).toLocaleDateString("pt-BR")}
                         </span>
-                        {v.resolvedAt ? (
+                        {v.status === 'resolved' ? (
                           <Badge className="bg-green-100 text-green-800 text-xs flex items-center gap-1">
                             <CheckCircle2 className="h-3 w-3" /> Resolvida
                           </Badge>
-                        ) : isAdmin ? (
-                          <Button size="sm" variant="outline" onClick={() => resolveMut.mutate({ id: v.id })} className="text-xs">
-                            Marcar Resolvida
-                          </Button>
+                        ) : v.status === 'investigating' ? (
+                          <Badge className="bg-orange-100 text-orange-800 text-xs flex items-center gap-1">
+                            <Clock className="h-3 w-3" /> Investigando
+                          </Badge>
                         ) : null}
+                        {isAdmin && v.status !== 'resolved' && (
+                          <Button size="sm" variant="outline" onClick={() => { setSelectedViolation(v); setViolationDialogOpen(true); }} className="text-xs">
+                            Gerenciar Incidente
+                          </Button>
+                        )}
+                        {isAdmin && v.status === 'resolved' && (
+                          <Button size="sm" variant="ghost" onClick={() => { setSelectedViolation(v); setViolationDialogOpen(true); }} className="text-xs">
+                            Ver Relatório
+                          </Button>
+                        )}
                       </div>
                     </div>
+                    {v.status === 'resolved' && v.rootCause && (
+                      <div className="mt-3 text-xs bg-slate-50 dark:bg-slate-800 p-2 rounded border text-muted-foreground">
+                        <span className="font-semibold text-slate-700 dark:text-slate-300">Causa Raiz:</span> {v.rootCause}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               );
@@ -345,6 +477,13 @@ export default function SlaPage() {
         onClose={() => { setDialogOpen(false); setEditConfig(null); }}
         config={editConfig}
         onSaved={() => { setDialogOpen(false); setEditConfig(null); }}
+      />
+
+      <ViolationDialog
+        open={violationDialogOpen}
+        onClose={() => { setViolationDialogOpen(false); setSelectedViolation(null); }}
+        violation={selectedViolation}
+        onSaved={() => { setViolationDialogOpen(false); setSelectedViolation(null); }}
       />
     </div>
   );

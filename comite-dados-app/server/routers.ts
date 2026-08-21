@@ -2785,6 +2785,8 @@ const slaRouter = router({
       minQualityScore: z.number().min(0).max(100).optional(),
       maxAccessResponseDays: z.number().min(1).max(90).optional(),
       alertEmails: z.string().optional(),
+      webhookUrl: z.string().url().optional().or(z.literal('')),
+      severity: z.string().optional(),
       alertOnBreachOnly: z.boolean().optional(),
       active: z.boolean().optional(),
     }))
@@ -2816,6 +2818,8 @@ const slaRouter = router({
       minQualityScore: z.number().optional(),
       maxAccessResponseDays: z.number().optional(),
       alertEmails: z.string().optional(),
+      webhookUrl: z.string().url().optional().or(z.literal('')),
+      severity: z.string().optional(),
       alertOnBreachOnly: z.boolean().optional(),
       active: z.boolean().optional(),
     }))
@@ -2829,6 +2833,13 @@ const slaRouter = router({
   resolveViolation: protectedProcedure
     .input(z.object({ id: z.number() }))
     .mutation(({ input }) => db.resolveSlaViolation(input.id)),
+  updateViolationStatus: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      status: z.string(),
+      rootCause: z.string().optional()
+    }))
+    .mutation(({ input }) => { const { id, ...data } = input; return db.updateSlaViolation(id, data as any); }),
 });
 
 // ─── Webhooks Router ──────────────────────────────────────────────────────────
