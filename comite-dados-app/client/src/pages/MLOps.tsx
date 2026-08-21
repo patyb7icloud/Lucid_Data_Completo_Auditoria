@@ -248,6 +248,7 @@ function PipelineDialog({ open, onClose, model, targetStatus, onConfirm }: any) 
 export default function MLOps() {
   const [tab, setTab] = useState("dashboard");
   const [showCreate, setShowCreate] = useState(false);
+  const [finopsPeriod, setFinopsPeriod] = useState("monthly");
   
   // Controle da Pipeline Dialog
   const [pipelineState, setPipelineState] = useState<{ open: boolean, model: any, targetStatus: string }>({ open: false, model: null, targetStatus: "" });
@@ -266,6 +267,9 @@ export default function MLOps() {
   const { data: finopsByAgent } = trpc.mlops.finops.byAgent.useQuery();
   const { data: finopsByUser } = trpc.mlops.finops.byUser.useQuery();
   const { data: finopsAnomalies } = trpc.mlops.finops.anomalies.useQuery();
+
+  // Multiplicador simulado para refletir o período selecionado no Frontend (já que o backend mock retorna mês)
+  const periodMultiplier = finopsPeriod === "weekly" ? 0.25 : finopsPeriod === "yearly" ? 12 : 1;
 
   const createModel = trpc.mlops.models.create.useMutation({
     onSuccess: () => {
@@ -613,16 +617,37 @@ export default function MLOps() {
 
           {/* FinOps Tab */}
           <TabsContent value="finops" className="space-y-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800">FinOps & Consumo de IA</h3>
+                <p className="text-sm text-slate-500">Monitoramento de custos operacionais e gasto de tokens LLM.</p>
+              </div>
+              <div className="flex items-center gap-3 bg-white p-1 rounded-lg border shadow-sm">
+                <Select value={finopsPeriod} onValueChange={setFinopsPeriod}>
+                  <SelectTrigger className="w-[180px] border-none shadow-none focus:ring-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="weekly">Semanal (Últimos 7 dias)</SelectItem>
+                    <SelectItem value="monthly">Mensal (Mês Atual)</SelectItem>
+                    <SelectItem value="yearly">Anual (YTD)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <Card className="border-emerald-200 bg-emerald-50/30">
                 <CardHeader className="py-4">
                   <CardTitle className="text-sm font-medium text-emerald-800 flex items-center justify-between">
-                    Custo Estimado (Mês) <DollarSign className="w-4 h-4 text-emerald-600" />
+                    Custo Estimado <DollarSign className="w-4 h-4 text-emerald-600" />
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-emerald-700">US$ {finopsSummary?.estimatedCostUSD?.toFixed(2)}</div>
-                  <p className="text-xs text-emerald-600/80 mt-1">Estimado baseado no uso de Tokens</p>
+                  <div className="text-2xl font-bold text-emerald-700">US$ {((finopsSummary?.estimatedCostUSD ?? 0) * periodMultiplier).toFixed(2)}</div>
+                  <p className="text-xs text-emerald-600/80 mt-1">
+                    {finopsPeriod === 'weekly' ? 'Projeção semanal' : finopsPeriod === 'yearly' ? 'Acumulado no ano' : 'Estimado no mês atual'}
+                  </p>
                 </CardContent>
               </Card>
               <Card className="border-blue-200 bg-blue-50/30">
@@ -632,7 +657,7 @@ export default function MLOps() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-blue-700">{(finopsSummary?.totalTokens ?? 0).toLocaleString('pt-BR')}</div>
+                  <div className="text-2xl font-bold text-blue-700">{Math.round((finopsSummary?.totalTokens ?? 0) * periodMultiplier).toLocaleString('pt-BR')}</div>
                   <p className="text-xs text-blue-600/80 mt-1">Prompt + Completion</p>
                 </CardContent>
               </Card>
@@ -649,11 +674,11 @@ export default function MLOps() {
               <Card>
                 <CardHeader className="py-4">
                   <CardTitle className="text-sm font-medium text-slate-500 flex items-center justify-between">
-                    Requisições Processadas <Activity className="w-4 h-4 text-slate-400" />
+                    Requisições <Activity className="w-4 h-4 text-slate-400" />
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-slate-700">{finopsSummary?.totalRequests}</div>
+                  <div className="text-2xl font-bold text-slate-700">{Math.round((finopsSummary?.totalRequests ?? 0) * periodMultiplier).toLocaleString('pt-BR')}</div>
                 </CardContent>
               </Card>
             </div>
@@ -667,7 +692,7 @@ export default function MLOps() {
                 </CardHeader>
                 <CardContent className="h-[250px]">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={finopsByAgent} layout="vertical" margin={{ left: 30 }}>
+                    <BarChart data={finopsByAgent?.map(a => ({ ...a, costUSD: a.costUSD * periodMultiplier }))} layout="vertical" margin={{ left: 30 }}>
                       <CartesianGrid strokeDasharray="3 3" horizontal={false} opacity={0.3} />
                       <XAxis type="number" />
                       <YAxis dataKey="name" type="category" tick={{ fontSize: 11 }} width={100} />
@@ -699,8 +724,8 @@ export default function MLOps() {
                         <tr key={u.id} className="border-b last:border-0 hover:bg-slate-50 transition-colors">
                           <td className="px-4 py-3 font-medium text-slate-700">{u.name}</td>
                           <td className="px-4 py-3 text-slate-500">{u.department}</td>
-                          <td className="px-4 py-3 text-right font-mono text-xs text-slate-600">{u.tokens.toLocaleString('pt-BR')}</td>
-                          <td className="px-4 py-3 text-right font-mono text-emerald-600 font-medium">${u.costUSD.toFixed(2)}</td>
+                          <td className="px-4 py-3 text-right font-mono text-xs text-slate-600">{Math.round(u.tokens * periodMultiplier).toLocaleString('pt-BR')}</td>
+                          <td className="px-4 py-3 text-right font-mono text-emerald-600 font-medium">${(u.costUSD * periodMultiplier).toFixed(2)}</td>
                         </tr>
                       ))}
                     </tbody>

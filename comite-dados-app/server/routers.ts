@@ -63,6 +63,7 @@ import { biConnectorsRouter } from "./biConnectorsRouter";
 import { hubRouter } from "./hubRouter";
 import { resolveDatabricksToken } from "./akvResolver";
 import { DatabricksAdapter } from "./adapters/DatabricksAdapter";
+import { aiGatewayRouter } from "./aiGatewayRouter";
 
 // ─── Domains Router ───────────────────────────────────────────────────────────
 const domainsRouter = router({
@@ -4165,6 +4166,7 @@ export const appRouter = router({
   auditoria: auditoriaRouter,
   hub: hubRouter,
   aiGovernance: aiGovernanceRouter,
+  aiGateway: aiGatewayRouter,
 });
 export type AppRouter = typeof appRouter;
 

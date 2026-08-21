@@ -12,7 +12,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { Code, Terminal, MessageSquareWarning, Flame, Edit2 } from "lucide-react";
+import { Code, Terminal, MessageSquareWarning, Flame, Edit2, MessageCircle } from "lucide-react";
 
 function AgentDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const utils = trpc.useUtils();
@@ -200,6 +200,87 @@ function RedTeamingSimulator({ agentId }: { agentId: number }) {
   );
 }
 
+function NexaClientSimulator({ agentId }: { agentId: number }) {
+  const [prompt, setPrompt] = useState("Por favor, resuma os benefícios do plano de saúde corporativo.");
+  const utils = trpc.useUtils();
+  
+  const chatMut = trpc.aiGateway.chat.useMutation({
+    onSuccess: () => {
+      // Refresh MLOps finops data implicitly if they switch tabs, but we can't do it directly here since it's another router.
+      // We'll just show success.
+    },
+    onError: (err) => {
+      toast.error(err.message);
+    }
+  });
+
+  return (
+    <Card className="border-indigo-100 shadow-sm">
+      <CardHeader className="bg-indigo-50/50 pb-4 border-b border-indigo-100">
+        <CardTitle className="text-lg font-bold text-indigo-900 flex items-center gap-2">
+          <MessageCircle className="w-5 h-5 text-indigo-600" /> Simulador de Aplicação Cliente
+        </CardTitle>
+        <CardDescription>
+          Envie uma requisição simulando o usuário final. O API Gateway interceptará a chamada, calculará os custos de LLM e registrará no FinOps.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-6 space-y-6">
+        <div className="space-y-2">
+          <Label>Prompt do Usuário Final</Label>
+          <Textarea 
+            value={prompt}
+            onChange={e => setPrompt(e.target.value)}
+            className="h-24 resize-none"
+            placeholder="Digite o que o usuário perguntaria..."
+          />
+          <p className="text-xs text-slate-500 italic">Dica: Tente usar a palavra "cpf" ou "ignore as instruções" para forçar o Guardrail a bloquear.</p>
+        </div>
+
+        <div className="flex justify-end">
+          <Button 
+            onClick={() => chatMut.mutate({ agentId, prompt })} 
+            disabled={chatMut.isPending || !prompt}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white"
+          >
+            {chatMut.isPending ? "Processando no Gateway..." : "Enviar via API Gateway"}
+          </Button>
+        </div>
+
+        {chatMut.data && (
+          <div className="mt-6 p-4 bg-slate-50 border rounded-lg space-y-4">
+            <div>
+              <Label className="text-xs text-slate-500 uppercase font-bold">Resposta do LLM</Label>
+              <div className="p-3 bg-white border rounded mt-1 text-sm text-slate-700">
+                {chatMut.data.reply}
+              </div>
+            </div>
+            
+            <div>
+              <Label className="text-xs text-slate-500 uppercase font-bold flex items-center gap-1">
+                <Zap className="w-3 h-3 text-amber-500" /> Telemetria de FinOps Registrada
+              </Label>
+              <div className="grid grid-cols-3 gap-4 mt-2">
+                <div className="p-3 bg-white border rounded">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">Prompt Tokens</div>
+                  <div className="text-lg font-mono text-slate-700">{chatMut.data.telemetry.promptTokens}</div>
+                </div>
+                <div className="p-3 bg-white border rounded">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">Completion Tokens</div>
+                  <div className="text-lg font-mono text-slate-700">{chatMut.data.telemetry.completionTokens}</div>
+                </div>
+                <div className="p-3 bg-emerald-50 border border-emerald-100 rounded">
+                  <div className="text-[10px] text-emerald-600/70 font-bold uppercase mb-1">Custo Incorrido (US$)</div>
+                  <div className="text-lg font-mono text-emerald-700">${chatMut.data.telemetry.costUsd}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function AiGovernance() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
@@ -329,9 +410,16 @@ export default function AiGovernance() {
         <div className="md:col-span-2">
           {selectedAgentId ? (
             <Tabs defaultValue="audit" className="space-y-6">
-              <TabsList className="bg-slate-100 border p-1 rounded-lg">
-                <TabsTrigger value="audit" className="data-[state=active]:bg-white">Auditoria Estática</TabsTrigger>
-                <TabsTrigger value="redteam" className="data-[state=active]:bg-red-50 data-[state=active]:text-red-700">Red Teaming (Simulação)</TabsTrigger>
+              <TabsList className="bg-slate-100 w-full justify-start h-auto p-1 overflow-x-auto rounded-lg">
+                <TabsTrigger value="audit" className="rounded-md data-[state=active]:bg-white data-[state=active]:shadow-sm text-sm">
+                  <ShieldCheck className="h-4 w-4 mr-2" /> Auditoria & Conformidade
+                </TabsTrigger>
+                <TabsTrigger value="redteam" className="rounded-md data-[state=active]:bg-white data-[state=active]:shadow-sm text-sm">
+                  <Terminal className="h-4 w-4 mr-2" /> Red Teaming (Simulação)
+                </TabsTrigger>
+                <TabsTrigger value="nexa" className="rounded-md data-[state=active]:bg-indigo-100 data-[state=active]:text-indigo-800 text-sm">
+                  <MessageCircle className="h-4 w-4 mr-2" /> Teste: API Gateway
+                </TabsTrigger>
               </TabsList>
 
               <TabsContent value="audit" className="space-y-6 mt-0">
@@ -418,6 +506,10 @@ export default function AiGovernance() {
 
               <TabsContent value="redteam" className="mt-0">
                 <RedTeamingSimulator agentId={selectedAgentId} />
+              </TabsContent>
+
+              <TabsContent value="nexa" className="mt-0">
+                <NexaClientSimulator agentId={selectedAgentId} />
               </TabsContent>
             </Tabs>
           ) : (

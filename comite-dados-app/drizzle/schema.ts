@@ -1180,6 +1180,9 @@ export const mlPredictionLogs = pgTable("ml_prediction_logs", {
   requestId:   varchar("request_id", { length: 128 }),
   flagged:     boolean("flagged").default(false),
   flagReason:  text("flag_reason"),
+  promptTokens: integer("prompt_tokens"),
+  completionTokens: integer("completion_tokens"),
+  costUsd:     real("cost_usd"),
   createdAt:   timestamp("created_at").defaultNow().notNull(),
 });
 export type MlPredictionLog = typeof mlPredictionLogs.$inferSelect;
