@@ -12,6 +12,7 @@ import {
   mlPredictionLogs,
   type InsertMlModel,
 } from "../drizzle/schema";
+import { databricksService } from "./services/databricks";
 
 // ─── Models Router ────────────────────────────────────────────────────────────
 const modelsRouter = router({

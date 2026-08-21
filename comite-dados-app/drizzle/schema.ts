@@ -1433,3 +1433,48 @@ export const intakeArtifacts = pgTable("intake_artifacts", {
 });
 export type IntakeArtifact = typeof intakeArtifacts.$inferSelect;
 export type InsertIntakeArtifact = typeof intakeArtifacts.$inferInsert;
+
+// ─── AI Governance (AI TRiSM) & LLMOps ───────────────────────────────────────
+export const llmAgents = pgTable("llm_agents", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 256 }).notNull(),
+  description: text("description"),
+  model: varchar("model", { length: 128 }),
+  assetType: varchar("asset_type", { length: 64 }).default("agent").notNull(),
+  endpointUrl: text("endpoint_url"),
+  ownerId: integer("owner_id").references(() => users.id),
+  status: varchar("status", { length: 64 }).default("active").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type LlmAgent = typeof llmAgents.$inferSelect;
+
+export const llmAgentAssets = pgTable("llm_agent_assets", {
+  id: serial("id").primaryKey(),
+  agentId: integer("agent_id").references(() => llmAgents.id).notNull(),
+  assetId: integer("asset_id").references(() => dataAssets.id).notNull(),
+  assignedAt: timestamp("assigned_at").defaultNow().notNull(),
+});
+export type LlmAgentAsset = typeof llmAgentAssets.$inferSelect;
+
+export const llmAgentAssessments = pgTable("llm_agent_assessments", {
+  id: serial("id").primaryKey(),
+  agentId: integer("agent_id").references(() => llmAgents.id).notNull(),
+  runDate: timestamp("run_date").defaultNow().notNull(),
+  status: varchar("status", { length: 64 }).default("passed").notNull(),
+  riskLevel: varchar("risk_level", { length: 64 }).default("low").notNull(), // critical, high, medium, low
+});
+export type LlmAgentAssessment = typeof llmAgentAssessments.$inferSelect;
+
+export const llmAgentGaps = pgTable("llm_agent_gaps", {
+  id: serial("id").primaryKey(),
+  assessmentId: integer("assessment_id").references(() => llmAgentAssessments.id).notNull(),
+  category: varchar("category", { length: 128 }).notNull(), // security, bias, guardrails
+  description: text("description").notNull(),
+  severity: varchar("severity", { length: 64 }).notNull(), // critical, high, medium, low
+  resolved: boolean("resolved").default(false).notNull(),
+  resolutionNotes: text("resolution_notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export type LlmAgentGap = typeof llmAgentGaps.$inferSelect;
+

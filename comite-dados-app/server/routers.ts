@@ -3987,6 +3987,65 @@ const intakeRouter = router({
     }),
 });
 
+import { databricksService } from "./services/databricks";
+
+// ─── AI Governance (AI TRiSM) Router ─────────────────────────────────────────
+const aiGovernanceRouter = router({
+  getIntegrationStatus: protectedProcedure.query(async () => {
+    return { isSimulated: await databricksService.getIsSimulated() };
+  }),
+  getAvailableDatabricksModels: protectedProcedure.query(async () => {
+    return databricksService.fetchMLflowModels();
+  }),
+  syncDatabricks: protectedProcedure.mutation(async ({ ctx }) => {
+    const models = await databricksService.fetchMLflowModels();
+    let synced = 0;
+    for (const m of models) {
+      // Evita duplicados basico (pelo nome)
+      const existing = await db.getLlmAgents().then(list => list.find(l => l.name === m.name));
+      if (!existing) {
+        await db.createLlmAgent({ ...m, ownerId: ctx.user.id });
+        synced++;
+      }
+    }
+    return { success: true, count: synced };
+  }),
+  listAgents: protectedProcedure.query(() => db.getLlmAgents()),
+  getAgentAssessments: protectedProcedure
+    .input(z.object({ agentId: z.number() }))
+    .query(({ input }) => db.getLlmAgentAssessments(input.agentId)),
+  getAssessmentGaps: protectedProcedure
+    .input(z.object({ assessmentId: z.number() }))
+    .query(({ input }) => db.getLlmAgentGaps(input.assessmentId)),
+  createAgent: protectedProcedure
+    .input(z.object({
+      name: z.string(),
+      description: z.string().optional(),
+      model: z.string().optional(),
+      assetType: z.enum(['agent', 'model']).default('agent'),
+      endpointUrl: z.string().optional(),
+    }))
+    .mutation(({ input, ctx }) => db.createLlmAgent({ ...input, ownerId: ctx.user.id })),
+  runAudit: protectedProcedure
+    .input(z.object({ agentId: z.number() }))
+    .mutation(async ({ input }) => {
+      // Pegamos o agente para saber o nome
+      const agents = await db.getLlmAgents();
+      const agent = agents.find(a => a.id === input.agentId);
+      if (!agent) throw new Error("Agent not found");
+
+      // Chama o Databricks Service (que pode ser simulado ou real)
+      const auditResult = await databricksService.auditAgent(agent.id, agent.name, agent.assetType);
+
+      // Usamos dbConn direto aqui para simplificar ou estendemos db.ts
+      // Como não exportamos a inserção de gaps genérica, vamos usar db.runLlmAgentAudit e depois alterar os gaps.
+      // Ou melhor, criamos um endpoint customizado direto se pudermos, ou delegamos ao db.ts.
+      // Como db.ts já possui runLlmAgentAudit que gera mock fixo, vamos sobrescrever o comportamento em db.ts.
+      // Vou passar as infos pro db.ts:
+      return db.runCustomLlmAgentAudit(input.agentId, auditResult);
+    }),
+});
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -4037,6 +4096,7 @@ export const appRouter = router({
   biConnectors: biConnectorsRouter,
   auditoria: auditoriaRouter,
   hub: hubRouter,
+  aiGovernance: aiGovernanceRouter,
 });
 export type AppRouter = typeof appRouter;
 

@@ -38,6 +38,8 @@ import {
   dsarRequests, InsertDsarRequest,
   connectorConfigs, InsertConnectorConfig,
   dataQualityHistory, InsertDataQualityHistory,
+  llmAgents, llmAgentAssets, llmAgentAssessments, llmAgentGaps,
+
   workflowDefinitions, InsertWorkflowDefinition, WorkflowDefinition,
   workflowInstances, InsertWorkflowInstance, WorkflowInstance,
   workflowStepActions, InsertWorkflowStepAction,
@@ -3175,4 +3177,52 @@ export async function getAnalysisResultsBySession(sessionId: number) {
   const dbConn = await getDb();
   if (!dbConn) return [];
   return dbConn.select().from(analysisResults).where(eq(analysisResults.sessionId, sessionId));
+}
+
+// ─── AI Governance & LLMOps (AI TRiSM) ───────────────────────────────────────
+export async function getLlmAgents() {
+  const dbConn = await getDb();
+  if (!dbConn) return [];
+  return dbConn.select().from(llmAgents).orderBy(desc(llmAgents.createdAt));
+}
+
+export async function createLlmAgent(data: any) {
+  const dbConn = await getDb();
+  if (!dbConn) throw new Error("DB not available");
+  const rows = await dbConn.insert(llmAgents).values(data).returning();
+  return rows[0];
+}
+
+export async function getLlmAgentAssessments(agentId: number) {
+  const dbConn = await getDb();
+  if (!dbConn) return [];
+  return dbConn.select().from(llmAgentAssessments).where(eq(llmAgentAssessments.agentId, agentId)).orderBy(desc(llmAgentAssessments.runDate));
+}
+
+export async function getLlmAgentGaps(assessmentId: number) {
+  const dbConn = await getDb();
+  if (!dbConn) return [];
+  return dbConn.select().from(llmAgentGaps).where(eq(llmAgentGaps.assessmentId, assessmentId)).orderBy(desc(llmAgentGaps.createdAt));
+}
+
+export async function runCustomLlmAgentAudit(agentId: number, auditResult: { riskLevel: string, gaps: any[] }) {
+  const dbConn = await getDb();
+  if (!dbConn) throw new Error("DB not available");
+  
+  const [assessment] = await dbConn.insert(llmAgentAssessments).values({
+    agentId,
+    status: auditResult.gaps.length > 0 ? 'failed' : 'passed',
+    riskLevel: auditResult.riskLevel,
+  }).returning();
+
+  if (auditResult.gaps.length > 0) {
+    const gapsToInsert = auditResult.gaps.map(g => ({
+      assessmentId: assessment.id,
+      category: g.category,
+      severity: g.severity,
+      description: g.description,
+    }));
+    await dbConn.insert(llmAgentGaps).values(gapsToInsert);
+  }
+  return assessment;
 }

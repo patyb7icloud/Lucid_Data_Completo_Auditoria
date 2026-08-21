@@ -72,7 +72,7 @@ import GestaoDemandas from "./pages/GestaoDemandas";
 import FilaAprovacoes from "./pages/FilaAprovacoes";
 import IntegracoesConectores from "./pages/IntegracoesConectores";
 import HubDashboard from "./pages/HubDashboard";
-
+import AiGovernance from "./pages/AiGovernance";
 function AuthenticatedApp() {
   return (
     <VCLayout>
@@ -137,6 +137,7 @@ function AuthenticatedApp() {
         <Route path="/ai-pipeline" component={AIPipeline} />
         <Route path="/bi-conectores" component={BiConectores} />
         <Route path="/hub" component={HubDashboard} />
+        <Route path="/ai-governance" component={AiGovernance} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>

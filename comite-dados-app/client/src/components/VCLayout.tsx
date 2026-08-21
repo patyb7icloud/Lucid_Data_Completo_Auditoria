@@ -76,6 +76,7 @@ const navGroups = [
       { href: "/ai-pipeline", icon: GitCommit, labelKey: "nav.aiPipeline" },
       { href: "/mlops", icon: BrainCircuit, labelKey: "nav.mlops" },
       { href: "/riscos-ia", icon: AlertTriangle, labelKey: "nav.aiRisk" },
+      { href: "/ai-governance", icon: Bot, labelKey: "nav.aiGovernance" },
     ]
   },
   {
