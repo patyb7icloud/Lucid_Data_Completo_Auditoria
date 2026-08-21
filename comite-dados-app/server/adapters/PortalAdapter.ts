@@ -82,7 +82,7 @@ export class PortalAdapter implements ISourceAdapter {
         .from(dataAttributes)
         .where(and(
           eq(dataAttributes.assetId, assetId),
-          sql`${dataAttributes.isVerified} = TRUE OR ${dataAttributes.isPii} = TRUE`
+          sql`(${dataAttributes.isVerified} = TRUE OR ${dataAttributes.isPii} = TRUE)`
         ));
       const classified = Number(piiRow?.cnt ?? 0);
       const piiScore = Math.round((classified / total) * 100);
@@ -96,14 +96,14 @@ export class PortalAdapter implements ISourceAdapter {
       });
 
       // ── 3. Unicidade de nomes de atributos ───────────────────────────────
-      const [dupRow] = await this.db.execute(
+      const dupRes = await this.db.execute(
         sql`SELECT COUNT(*) as cnt FROM (
               SELECT name FROM data_attributes
-              WHERE assetId = ${assetId}
+              WHERE "assetId" = ${assetId}
               GROUP BY name HAVING COUNT(*) > 1
             ) t`
       ) as any;
-      const dupCount = Number(dupRow?.[0]?.cnt ?? 0);
+      const dupCount = Number(dupRes?.rows?.[0]?.cnt ?? 0);
       const uniqueScore = dupCount === 0 ? 100 : Math.max(0, Math.round(100 - (dupCount / total) * 100));
       results.push({
         metricName: "unicidade",

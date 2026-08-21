@@ -186,24 +186,13 @@ const connectorsRouter = router({
     if (!db) return { total: 0, active: 0, withErrors: 0, byType: {}, totalSyncs: 0 };
     
     const allBi = await db.select().from(biConnectors);
-    const allGeneral = await db.select().from(connectorConfigs);
 
     const byType = allBi.reduce((acc, c) => { acc[c.type] = (acc[c.type] ?? 0) + 1; return acc; }, {} as Record<string, number>);
-    
-    allGeneral.forEach(c => {
-      // Map general connector types to BI types or "other"
-      let t = c.connectorType;
-      if (t === "power_bi") t = "powerbi";
-      else if (t === "sap_hana") t = "sap";
-      
-      const mappedType = ["powerbi", "sap", "databricks", "tableau", "looker"].includes(t) ? t : "other";
-      byType[mappedType] = (byType[mappedType] ?? 0) + 1;
-    });
 
     return {
-      total: allBi.length + allGeneral.length,
-      active: allBi.filter(c => c.isActive).length + allGeneral.filter(c => c.active).length,
-      withErrors: allBi.filter(c => c.lastSyncStatus === "error").length + allGeneral.filter(c => c.lastTestSuccess === false).length,
+      total: allBi.length,
+      active: allBi.filter(c => c.isActive).length,
+      withErrors: allBi.filter(c => c.lastSyncStatus === "error").length,
       byType,
       totalSyncs: allBi.reduce((s, c) => s + (c.syncCount ?? 0), 0),
     };

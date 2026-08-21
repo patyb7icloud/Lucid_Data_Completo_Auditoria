@@ -345,7 +345,7 @@ export const hubRouter = router({
       SELECT
         ROUND(AVG(
           EXTRACT(EPOCH FROM (updated_at - created_at)) / 86400
-        ), 1) AS avg_lead_time_days
+        )::numeric, 1) AS avg_lead_time_days
       FROM ai_projects
       WHERE status = 'completed'
     `);

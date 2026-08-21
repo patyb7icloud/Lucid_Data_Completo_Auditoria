@@ -2164,7 +2164,7 @@ export async function getGlobalQualityDimensions() {
 
   return db.select({
     metricName: dataQualityChecks.metricName,
-    avgScore: sql<number>`ROUND(AVG(${dataQualityChecks.score}), 1)`,
+    avgScore: sql<number>`ROUND(AVG(${dataQualityChecks.score})::numeric, 1)`,
     totalChecks: sql<number>`COUNT(*)`,
   })
     .from(dataQualityChecks)
@@ -2252,7 +2252,11 @@ export async function getMaturityScore() {
   const totalAssets = totalAssetsRow?.cnt ?? 0;
 
   const [withDescRow] = await db.select({ cnt: count() }).from(dataAssets)
-    .where(and(isNotNull(dataAssets.description), sql`LENGTH(TRIM(${dataAssets.description})) > 0`));
+    .where(and(
+      isNotNull(dataAssets.description), 
+      sql`LENGTH(TRIM(${dataAssets.description})) > 0`,
+      sql`NOT EXISTS (SELECT 1 FROM data_attributes WHERE asset_id = ${dataAssets.id} AND (description IS NULL OR LENGTH(TRIM(description)) = 0))`
+    ));
   const withDesc = withDescRow?.cnt ?? 0;
 
   const [withOwnerRow] = await db
@@ -2326,7 +2330,13 @@ export async function getMaturityDrilldown() {
   const missingDesc = await db
     .select({ id: dataAssets.id, name: dataAssets.name, type: dataAssets.type })
     .from(dataAssets)
-    .where(or(isNull(dataAssets.description), sql`LENGTH(TRIM(${dataAssets.description})) = 0`))
+    .where(
+      or(
+        isNull(dataAssets.description), 
+        sql`LENGTH(TRIM(${dataAssets.description})) = 0`,
+        sql`EXISTS (SELECT 1 FROM data_attributes WHERE asset_id = ${dataAssets.id} AND (description IS NULL OR LENGTH(TRIM(description)) = 0))`
+      )
+    )
     .limit(50);
 
   // Ativos sem Data Owner

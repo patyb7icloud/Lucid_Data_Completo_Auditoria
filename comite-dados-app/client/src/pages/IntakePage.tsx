@@ -144,8 +144,9 @@ const EMPTY_FORM = {
   // A
   title: "", description: "", type: "dado" as string, priority: "media" as string,
   desiredDeadline: "", submitterDept: "", managerApproval: "",
+  submitterName: "", submitterEmail: "", submitterPhone: "", keyUser: "", bpResponsible: "",
   // B
-  problemStatement: "", objective: "", targetAudience: "", usageFrequency: "", financialImpact: "",
+  problemStatement: "", objective: "", targetAudience: "", involvedAreas: "", usageFrequency: "", financialImpact: "",
   // C
   sourceSystems: "", mainEntities: "", estimatedVolume: "", updateFrequency: "",
   historyNeeded: "", containsPii: "nao_sei" as string, piiColumns: "", expectedFields: "",
@@ -216,10 +217,16 @@ function MultiStepIntakeDialog({ open, onClose, onSuccess }: {
       priority: form.priority as any,
       desiredDeadline: form.desiredDeadline || undefined,
       submitterDept: form.submitterDept || undefined,
+      submitterName: form.submitterName || undefined,
+      submitterEmail: form.submitterEmail || undefined,
+      submitterPhone: form.submitterPhone || undefined,
+      keyUser: form.keyUser || undefined,
+      bpResponsible: form.bpResponsible || undefined,
       managerApproval: form.managerApproval || undefined,
       problemStatement: form.problemStatement || undefined,
       objective: form.objective || undefined,
       targetAudience: form.targetAudience || undefined,
+      involvedAreas: form.involvedAreas || undefined,
       usageFrequency: form.usageFrequency || undefined,
       financialImpact: form.financialImpact || undefined,
       sourceSystems: form.sourceSystems || undefined,
@@ -328,9 +335,34 @@ function MultiStepIntakeDialog({ open, onClose, onSuccess }: {
                   </Select>
                 </div>
                 <div className="space-y-1">
-                  <Label>Área / Célula Solicitante *</Label>
+                  <Label>Autor (Nome) *</Label>
+                  <Input value={form.submitterName} onChange={e => set("submitterName", e.target.value)}
+                    placeholder="Seu nome completo" />
+                </div>
+                <div className="space-y-1">
+                  <Label>E-mail *</Label>
+                  <Input value={form.submitterEmail} onChange={e => set("submitterEmail", e.target.value)}
+                    placeholder="seu.email@empresa.com" />
+                </div>
+                <div className="space-y-1">
+                  <Label>Telefone</Label>
+                  <Input value={form.submitterPhone} onChange={e => set("submitterPhone", e.target.value)}
+                    placeholder="(XX) XXXXX-XXXX" />
+                </div>
+                <div className="space-y-1">
+                  <Label>Gerência Área *</Label>
                   <Input value={form.submitterDept} onChange={e => set("submitterDept", e.target.value)}
                     placeholder="Ex: Comercial Brasil / TI VC / Operações" />
+                </div>
+                <div className="space-y-1">
+                  <Label>Key User</Label>
+                  <Input value={form.keyUser} onChange={e => set("keyUser", e.target.value)}
+                    placeholder="Nome do usuário chave da área" />
+                </div>
+                <div className="space-y-1">
+                  <Label>BP Responsável Área</Label>
+                  <Input value={form.bpResponsible} onChange={e => set("bpResponsible", e.target.value)}
+                    placeholder="Nome do Business Partner" />
                 </div>
                 <div className="space-y-1">
                   <Label>Data de Necessidade</Label>
@@ -349,33 +381,33 @@ function MultiStepIntakeDialog({ open, onClose, onSuccess }: {
           {step === 1 && (
             <div className="space-y-4">
               <div className="space-y-1">
-                <Label>Problema ou Oportunidade *</Label>
+                <Label>Descrição do Problema *</Label>
                 <Textarea value={form.problemStatement} onChange={e => set("problemStatement", e.target.value)}
                   placeholder={'Ex: "Hoje não temos visibilidade de margem por SKU, o que impede decisões de precificação."'}
                   rows={3} />
               </div>
               <div className="space-y-1">
-                <Label>Objetivo da Demanda *</Label>
+                <Label>Descrição Detalhada da Demanda / Melhoria e Pré-requisitos *</Label>
                 <Textarea value={form.objective} onChange={e => set("objective", e.target.value)}
                   placeholder={'Ex: "Dashboard com margem líquida por SKU, planta e cliente, atualizado diariamente."'}
                   rows={3} />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
+                  <Label>Áreas Envolvidas (Pontos Focais e Impactados) *</Label>
+                  <Textarea value={form.involvedAreas} onChange={e => set("involvedAreas", e.target.value)}
+                    placeholder="Ex: Comercial Brasil, TI, Supply Chain" rows={2} />
+                </div>
+                <div className="space-y-1">
                   <Label>Público Usuário Final *</Label>
                   <Textarea value={form.targetAudience} onChange={e => set("targetAudience", e.target.value)}
                     placeholder="Ex: Diretores Comerciais, Analistas de Pricing" rows={2} />
                 </div>
-                <div className="space-y-1">
-                  <Label>Frequência de Uso Estimada</Label>
-                  <Input value={form.usageFrequency} onChange={e => set("usageFrequency", e.target.value)}
-                    placeholder="Diário | Semanal | Mensal | Pontual" />
-                </div>
               </div>
               <div className="space-y-1">
-                <Label>Impacto Financeiro ou Estratégico *</Label>
+                <Label>Impacto Financeiro *</Label>
                 <Textarea value={form.financialImpact} onChange={e => set("financialImpact", e.target.value)}
-                  placeholder="Ex: Redução de 15% no ciclo de precificação. Estimativa: R$ 500k/ano." rows={2} />
+                  placeholder="Ex: Horas que serão economizadas; Custo evitados; Ganho direto. Estimativa: R$ 500k/ano." rows={2} />
               </div>
             </div>
           )}
@@ -385,9 +417,9 @@ function MultiStepIntakeDialog({ open, onClose, onSuccess }: {
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <Label>Sistema(s) de Origem *</Label>
+                  <Label>Origem dos Dados (Sistema(s)) *</Label>
                   <Input value={form.sourceSystems} onChange={e => set("sourceSystems", e.target.value)}
-                    placeholder="Ex: SAP SD, CRM Salesforce, XLSX, API REST" />
+                    placeholder="Transações SAP, Sistemas, Bases Manuais, etc" />
                 </div>
                 <div className="space-y-1">
                   <Label>Entidade(s) Principal(is) *</Label>
@@ -935,15 +967,19 @@ function IntakeDetailSheet({ intake, open, onClose, isPrivileged }: {
 
         <div className="mt-4 space-y-3">
           <SectionBox title="A — Identificação">
-            <FieldRow label="Solicitante" value={`${intake.submitterName ?? "—"}${intake.submitterEmail ? ` · ${intake.submitterEmail}` : ""}${intake.submitterDept ? ` · ${intake.submitterDept}` : ""}`} />
+            <FieldRow label="Autor" value={`${intake.submitterName ?? "—"}${intake.submitterEmail ? ` · ${intake.submitterEmail}` : ""}${intake.submitterPhone ? ` · ${intake.submitterPhone}` : ""}`} />
+            <FieldRow label="Gerência Área" value={intake.submitterDept} />
+            <FieldRow label="Key User" value={intake.keyUser} />
+            <FieldRow label="BP Responsável Área" value={intake.bpResponsible} />
             <FieldRow label="Aprovação da liderança" value={intake.managerApproval} />
             <FieldRow label="Prazo desejado" value={intake.desiredDeadline} />
           </SectionBox>
 
           {(intake.problemStatement || intake.objective) && (
             <SectionBox title="B — Caso de Uso">
-              <FieldRow label="Problema / Oportunidade" value={intake.problemStatement} />
-              <FieldRow label="Objetivo" value={intake.objective} />
+              <FieldRow label="Descrição do Problema" value={intake.problemStatement} />
+              <FieldRow label="Descrição Detalhada" value={intake.objective} />
+              <FieldRow label="Áreas Envolvidas" value={intake.involvedAreas} />
               <FieldRow label="Público usuário final" value={intake.targetAudience} />
               <FieldRow label="Freq. de uso" value={intake.usageFrequency} />
               <FieldRow label="Impacto financeiro" value={intake.financialImpact} />
