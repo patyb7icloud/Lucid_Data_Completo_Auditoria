@@ -53,6 +53,7 @@ import LandingPage from "./pages/LandingPage";
 import SetupWizard from "./pages/SetupWizard";
 import { OnboardingTour } from "./components/OnboardingTour";
 import WorkflowEditor from "./pages/WorkflowEditor";
+import ExecutiveReport from "./pages/ExecutiveReport";
 import SignupPage from "./pages/SignupPage";
 import IntakePage from "./pages/IntakePage";
 import TagPolicies from "./pages/TagPolicies";
@@ -138,6 +139,7 @@ function AuthenticatedApp() {
         <Route path="/bi-conectores" component={BiConectores} />
         <Route path="/hub" component={HubDashboard} />
         <Route path="/ai-governance" component={AiGovernance} />
+        <Route path="/executive-report" component={ExecutiveReport} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>

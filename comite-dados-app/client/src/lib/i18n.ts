@@ -65,6 +65,7 @@ const translations: Record<Locale, Record<string, string>> = {
     "nav.mlops":                 "MLOps & LLMOps",
     "nav.aiRisk":                "Riscos de IA",
     "nav.aiGovernance":          "Governança de IA (AI TRiSM)",
+    "nav.executiveReport":       "Painel de indicadores Executivos",
     "nav.biConnectors":          "Integrações BI/SAP",
     "nav.aiAssistant":          "Assistente IA",
     "nav.help":                 "Sobre o Sistema",

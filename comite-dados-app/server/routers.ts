@@ -63,7 +63,9 @@ import { biConnectorsRouter } from "./biConnectorsRouter";
 import { hubRouter } from "./hubRouter";
 import { resolveDatabricksToken } from "./akvResolver";
 import { DatabricksAdapter } from "./adapters/DatabricksAdapter";
+import { executiveMetricsRouter } from "./executiveMetricsRouter";
 import { aiGatewayRouter } from "./aiGatewayRouter";
+import { syncJobRouter } from "./syncJobRouter";
 
 // ─── Domains Router ───────────────────────────────────────────────────────────
 const domainsRouter = router({
@@ -3427,7 +3429,7 @@ const connectorsRouter = router({
     .mutation(async ({ input, ctx }) => {
       if (ctx.user?.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
       const config = await db.getConnectorConfigById(input.id);
-      if (!config) throw new TRPCError({ code: "NOT_FOUND" });
+      if (!config) throw new TRPCError({ code: 'NOT_FOUND' });
       try {
         const rawCfg = typeof config.configJson === 'string' ? JSON.parse(config.configJson) : config.configJson as Record<string, any>;
 
@@ -3451,11 +3453,22 @@ const connectorsRouter = router({
           }, config.name);
           const testRes = await adapter.testConnection();
           const modeLabel = rawCfg.authMode === "scope" ? `Secret Scope "${rawCfg.scopeName}"` : rawCfg.authMode === "akv" ? "AKV" : rawCfg.authMode === "entra_id" ? "Entra ID (CLI)" : "PAT";
-          const msg = testRes.ok
+          
+          let isOk = false;
+          let errMsg = "Erro desconhecido";
+          
+          if (typeof testRes === "boolean") {
+            isOk = testRes;
+          } else {
+            isOk = testRes.ok;
+            errMsg = testRes.message ?? "Erro na execução da query";
+          }
+
+          const msg = isOk
             ? `Conexão bem-sucedida (token via ${modeLabel})`
-            : `Falha ao conectar ao Databricks (modo: ${modeLabel}) - ERRO: ${testRes.message}`;
-          await db.saveConnectorTestResult(input.id, testRes.ok, msg);
-          return { success: testRes.ok, message: msg };
+            : `Falha ao conectar ao Databricks (modo: ${modeLabel}) - ERRO: ${errMsg}`;
+          await db.saveConnectorTestResult(input.id, isOk, msg);
+          return { success: isOk, message: msg };
         }
 
         // Fluxo padrão para todos os outros tipos de conector
@@ -3481,7 +3494,7 @@ const connectorsRouter = router({
     .mutation(async ({ input, ctx }) => {
       if (ctx.user?.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
       const config = await db.getConnectorConfigById(input.id);
-      if (!config) throw new TRPCError({ code: "NOT_FOUND" });
+      if (!config) throw new TRPCError({ code: 'NOT_FOUND' });
       try {
         const { metadataCollector } = await import("./metadataCollector.js");
         const rawCfg = typeof config.configJson === 'string' ? JSON.parse(config.configJson) : config.configJson as Record<string, any>;
@@ -4158,6 +4171,8 @@ export const appRouter = router({
   workflow: workflowRouter,
   assetComments: assetCommentsRouter,
   intake: intakeRouter,
+  executiveMetrics: executiveMetricsRouter,
+  syncJob: syncJobRouter,
   // ─── Lacunas Lucid Data Governance ───────────────────────────────────────────
   mlops: mlopsRouter,
   aiRisk: aiRiskRouter,

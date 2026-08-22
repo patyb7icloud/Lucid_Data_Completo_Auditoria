@@ -19,9 +19,9 @@ export interface ISourceAdapter {
 
   /**
    * Testa a conectividade com a fonte de dados.
-   * Retorna true se conectou com sucesso.
+   * Retorna true se conectou com sucesso, ou um objeto detalhado.
    */
-  testConnection(): Promise<boolean>;
+  testConnection(): Promise<boolean | {ok: boolean, message?: string}>;
 
   /**
    * Executa todos os checks de qualidade para um ativo específico.

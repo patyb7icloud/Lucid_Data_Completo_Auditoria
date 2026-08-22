@@ -405,24 +405,26 @@ export const appRouter = router({
     getWeeklyMetrics: protectedProcedure
       .input(z.object({ tenantCatalog: z.string() }))
       .query(async ({ input }) => {
-        const { getLatestWeeklyMetrics } = await import("./monitoring");
-        return await getLatestWeeklyMetrics(input.tenantCatalog);
+        // const { getLatestWeeklyMetrics } = await import("./monitoring");
+        // return await getLatestWeeklyMetrics(input.tenantCatalog);
+        throw new Error("Not implemented");
       }),
 
     generateWeeklyMetrics: protectedProcedure
       .input(z.object({ tenantCatalog: z.string() }))
       .mutation(async ({ input }) => {
-        const { generateWeeklyMetrics } = await import("./monitoring");
-        return await generateWeeklyMetrics(input.tenantCatalog);
+        // const { generateWeeklyMetrics } = await import("./monitoring");
+        // return await generateWeeklyMetrics(input.tenantCatalog);
+        throw new Error("Not implemented");
       }),
 
     setupWeeklyJob: protectedProcedure
       .input(z.object({ tenantCatalog: z.string() }))
       .mutation(async ({ input, ctx }) => {
-        const { setupWeeklyMonitoringJob } = await import("./setup-monitoring-job");
-        // Em WebDev, ctx.req.cookies.app_session_id contém a sessão
-        const sessionToken = ctx.req.cookies?.app_session_id || "";
-        return await setupWeeklyMonitoringJob(input.tenantCatalog, sessionToken);
+        // const { setupWeeklyMonitoringJob } = await import("./setup-monitoring-job");
+        // const sessionToken = ctx.req.cookies?.app_session_id || "";
+        // return await setupWeeklyMonitoringJob(input.tenantCatalog, sessionToken);
+        throw new Error("Not implemented");
       }),
   }),
 
