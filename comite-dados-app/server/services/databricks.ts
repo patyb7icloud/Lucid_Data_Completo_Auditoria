@@ -329,16 +329,79 @@ export class DatabricksService {
       };
     }
 
-    return {
-      riskLevel: "medium",
-      gaps: [
-        {
-          category: "Segurança Real",
-          severity: "medium",
-          description: "Integração real efetuada. Ajuste as roles no Unity Catalog e verifique filtros de prompt."
+    const adapter = new DatabricksAdapter({
+      host: conn.host,
+      httpPath: conn.httpPath,
+      token: conn.token,
+      catalog: "system"
+    });
+
+    const gaps: any[] = [];
+    let riskLevel = "low";
+
+    try {
+      // Query privileges directly from system catalog
+      const query = `
+        SELECT grantee, table_name, privilege_type 
+        FROM system.information_schema.table_privileges 
+        WHERE grantee != 'System' AND privilege_type = 'SELECT'
+        LIMIT 50
+      `;
+      const rows = await adapter.queryRaw(query);
+
+      // Heurística de Segurança: Tabelas sensíveis com SELECT para grupos amplos
+      const sensitiveKeywords = ['rh', 'func', 'fin', 'cliente', 'pagamento', 'salary', 'idade'];
+      const overlyBroadGrantees = ['users', 'account users', 'analistas'];
+
+      let foundRisks = 0;
+
+      for (const row of rows) {
+        const table = String(row.table_name || '').toLowerCase();
+        const grantee = String(row.grantee || '').toLowerCase();
+
+        const isSensitive = sensitiveKeywords.some(kw => table.includes(kw));
+        const isBroad = overlyBroadGrantees.some(bg => grantee.includes(bg));
+
+        if (isSensitive && isBroad) {
+          foundRisks++;
+          gaps.push({
+            category: "Segurança de Dados Sensíveis (PII)",
+            severity: "critical",
+            description: `A tabela sensível '${row.table_name}' possui permissão SELECT para o grupo amplo '${row.grantee}'. Risco de vazamento por LLM.`
+          });
+        } else if (isSensitive && !isBroad) {
+          // Apenas um alerta médio
+          if (foundRisks === 0 && gaps.length < 3) {
+            gaps.push({
+              category: "Atenção: Acesso a Dados PII",
+              severity: "medium",
+              description: `A tabela '${row.table_name}' está acessível para '${row.grantee}'. Certifique-se de que o Agente tem Guardrails ativos.`
+            });
+          }
         }
-      ]
-    };
+      }
+
+      if (foundRisks > 0) riskLevel = "critical";
+      else if (gaps.length > 0) riskLevel = "medium";
+      else {
+        gaps.push({
+          category: "Conformidade Confirmada",
+          severity: "low",
+          description: "Varredura do Unity Catalog não detectou superexposição de tabelas críticas (RH/Fin) para o grupo Users."
+        });
+      }
+
+    } catch (err: any) {
+      console.warn("Erro ao ler information schema do UC:", err);
+      gaps.push({
+        category: "Falta de Privilégios para Auditoria",
+        severity: "medium",
+        description: `O Databricks rejeitou a query em 'system.information_schema'. Possível falta de permissão do token. Erro: ${err.message?.substring(0, 100)}...`
+      });
+      riskLevel = "medium";
+    }
+
+    return { riskLevel, gaps };
   }
 }
 

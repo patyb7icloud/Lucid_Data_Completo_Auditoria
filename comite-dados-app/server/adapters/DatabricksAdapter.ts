@@ -176,9 +176,6 @@ export class DatabricksAdapter implements ISourceAdapter {
 
   // ─── Interface pública ───────────────────────────────────────────────────────
 
-  /**
-   * Testa a conectividade com o Databricks SQL Warehouse.
-   */
   async testConnection(): Promise<boolean> {
     try {
       await this.withSession(async (session) => {
@@ -189,6 +186,16 @@ export class DatabricksAdapter implements ISourceAdapter {
       console.error("[DatabricksAdapter] Conexão falhou:", e.message);
       return false;
     }
+  }
+
+  /**
+   * Executa uma query SQL arbitrária no Databricks.
+   * Utilizado para auditorias de segurança avançadas (Information Schema).
+   */
+  async queryRaw(sql: string): Promise<Record<string, unknown>[]> {
+    return this.withSession(async (session) => {
+      return this.query(session, sql);
+    });
   }
 
   async runChecks(
