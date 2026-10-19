@@ -573,7 +573,7 @@ export class MetadataCollectorService {
       }
 
       // --- Busca linhagem via system tables (se disponível) ---
-      let lineageEdges: Array<{sourceName: string; targetName: string; type: "direto"}> = [];
+      let lineageEdges: Array<{sourceName: string; targetName: string; type: "direto" | "agregado" | "transformado"}> = [];
       try {
         const lineageRows = await runQuery(`
           SELECT source_table_schema, source_table_name, target_table_schema, target_table_name 

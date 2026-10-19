@@ -14,6 +14,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Code, Terminal, MessageSquareWarning, Flame, Edit2, MessageCircle } from "lucide-react";
 
+type AgentForm = { name: string; description: string; model: string; endpointUrl: string; assetType: "model" | "agent" };
+
 function AgentDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const utils = trpc.useUtils();
   const createMut = trpc.aiGovernance.createAgent.useMutation({
@@ -26,7 +28,7 @@ function AgentDialog({ open, onClose }: { open: boolean; onClose: () => void }) 
 
   const { data: dbxModels = [], isLoading: isLoadingModels } = trpc.aiGovernance.getAvailableDatabricksModels.useQuery(undefined, { enabled: open });
 
-  const [form, setForm] = useState({ name: "", description: "", model: "", endpointUrl: "", assetType: "agent" });
+  const [form, setForm] = useState<AgentForm>({ name: "", description: "", model: "", endpointUrl: "", assetType: "agent" });
 
   const handleModelSelect = (selectedName: string) => {
     const model = dbxModels.find((m: any) => m.name === selectedName);
@@ -36,7 +38,7 @@ function AgentDialog({ open, onClose }: { open: boolean; onClose: () => void }) 
         description: model.description || "",
         model: model.model || "",
         endpointUrl: model.endpointUrl || "",
-        assetType: model.assetType || "agent"
+        assetType: model.assetType === "model" ? "model" : "agent"
       });
     }
   };
@@ -65,7 +67,7 @@ function AgentDialog({ open, onClose }: { open: boolean; onClose: () => void }) 
           </div>
           <div className="space-y-2">
             <Label>Tipo de Ativo</Label>
-            <Select value={form.assetType} onValueChange={v => setForm({ ...form, assetType: v })}>
+            <Select value={form.assetType} onValueChange={v => setForm({ ...form, assetType: v === "model" ? "model" : "agent" })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="agent">Agente de IA (GenAI)</SelectItem>

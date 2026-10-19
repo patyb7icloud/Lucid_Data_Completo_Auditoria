@@ -162,7 +162,7 @@ export const executiveMetricsRouter = router({
         aiGov.riskClassifiedPercent = Math.round((boundedRisk / totalAiEntities) * 100);
 
         // Projetos de IA além do gate G1 (G2, G3, G4)
-        const gatesCompleted = allAiProjects.filter(p => p.gate === 'G2' || p.gate === 'G3' || p.gate === 'G4').length;
+        const gatesCompleted = allAiProjects.filter(p => p.gate === 'G2' || p.gate === 'G3').length;
         aiGov.p1p2GatesCompletedPercent = allAiProjects.length > 0 ? Math.round((gatesCompleted / allAiProjects.length) * 100) : 0;
 
         // Modelos com linhagem documentada (associações llm_agent_assets)

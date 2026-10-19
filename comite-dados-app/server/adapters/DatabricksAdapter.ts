@@ -20,7 +20,7 @@
  */
 
 import type { ISourceAdapter, AssetMeta, QualityCheckResult } from "./ISourceAdapter";
-import type { QualityRule as SelectQualityRule } from "../../drizzle/schema";
+import type { SelectQualityRule } from "../db";
 
 export interface DatabricksAdapterConfig {
   /** Ex: adb-123456789.1.azuredatabricks.net (sem https://) */
@@ -33,6 +33,55 @@ export interface DatabricksAdapterConfig {
   catalog?: string;
   /** Timeout por query em ms (default: 30000) */
   queryTimeoutMs?: number;
+}
+
+type JsonRecord = Record<string, unknown>;
+
+function asJsonRecord(value: unknown): JsonRecord | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as JsonRecord
+    : null;
+}
+
+function expressionString(expression: unknown, keys: string[]): string | null {
+  const record = asJsonRecord(expression);
+  if (!record) return null;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return null;
+}
+
+function normalizeDimensionName(name: string | null | undefined): string {
+  return name?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase() ?? "";
+}
+
+function thresholdForDimension(
+  rules: SelectQualityRule[],
+  dimensionName: string,
+  fallback: number,
+): number {
+  return rules.find((rule) =>
+    rule.isActive !== false && normalizeDimensionName(rule.dimensionName) === dimensionName
+  )?.threshold ?? fallback;
+}
+
+function regexConditions(expression: unknown): Array<{ columnName: string; pattern: string }> {
+  const root = asJsonRecord(expression);
+  if (!root) return [];
+
+  const conditions = Array.isArray(root.and) ? root.and : [root];
+  return conditions.flatMap((value) => {
+    const condition = asJsonRecord(value);
+    if (!condition || typeof condition.operator !== "string" || !/regex|rlike|matches/i.test(condition.operator)) {
+      return [];
+    }
+
+    const columnName = expressionString(condition, ["field", "column", "columnName"]);
+    const pattern = expressionString(condition, ["pattern", "regex", "customPattern", "value"]);
+    return columnName && pattern ? [{ columnName, pattern }] : [];
+  });
 }
 
 export class DatabricksAdapter implements ISourceAdapter {
@@ -243,8 +292,7 @@ export class DatabricksAdapter implements ISourceAdapter {
         const totalCells = total * cols.length;
         const complScore =
           totalCells === 0 ? 100 : Math.round(((totalCells - nullCount) / totalCells) * 100);
-        const complThreshold =
-          rules.find((r) => r.ruleType === "completude")?.threshold ?? 80;
+        const complThreshold = thresholdForDimension(rules, "completude", 80);
 
         results.push({
           metricName: "completude",
@@ -257,7 +305,7 @@ export class DatabricksAdapter implements ISourceAdapter {
       }
 
       // ── 2. Unicidade — detecta PK via DESCRIBE TABLE EXTENDED ─────────────
-      const uniThreshold = rules.find((r) => r.ruleType === "unicidade")?.threshold ?? 95;
+      const uniThreshold = thresholdForDimension(rules, "unicidade", 95);
       let pkCol: string | null = null;
 
       try {
@@ -317,7 +365,7 @@ export class DatabricksAdapter implements ISourceAdapter {
       // ── 3. Atualidade ─────────────────────────────────────────────────────
       const tsColumns = ["updated_at", "modified_at", "data_atualizacao", "updated_date"];
       const foundTs = cols.find((c) => tsColumns.includes(c.toLowerCase()));
-      const actualThreshold = rules.find((r) => r.ruleType === "validade")?.threshold ?? 70;
+      const actualThreshold = thresholdForDimension(rules, "atualidade", 70);
 
       if (foundTs) {
         const safeTs = this.escapeId(foundTs);
@@ -353,14 +401,15 @@ export class DatabricksAdapter implements ISourceAdapter {
 
       // ── 4. Validade por regex (regras customizadas) ───────────────────────
       // Databricks usa RLIKE em vez de ~ (PostgreSQL)
-      const regexRules = rules.filter(
-        (r) => r.ruleType === "regex" && r.columnName && r.customPattern
-      );
-      for (const rule of regexRules) {
-        if (!cols.includes(rule.columnName!)) continue;
-        const safeCol = this.escapeId(rule.columnName!);
+      const regexRules = rules.flatMap((rule) => {
+        if (rule.isActive === false || normalizeDimensionName(rule.dimensionName) !== "validade") return [];
+        return regexConditions(rule.expressionJson).map((condition) => ({ rule, ...condition }));
+      });
+      for (const { rule, columnName, pattern } of regexRules) {
+        if (!cols.includes(columnName)) continue;
+        const safeCol = this.escapeId(columnName);
         // Escapa aspas simples no padrão regex para segurança
-        const safePattern = rule.customPattern!.replace(/'/g, "\\'");
+        const safePattern = pattern.replace(/'/g, "\\'");
         try {
           const invalidRows = await this.query(
             session,
@@ -373,10 +422,10 @@ export class DatabricksAdapter implements ISourceAdapter {
           const validThreshold = rule.threshold ?? 90;
 
           results.push({
-            metricName: `validade_${rule.columnName}`,
+            metricName: `validade_${columnName}`,
             score: validScore,
             threshold: validThreshold,
-            details: `${invalid} de ${total} linhas violam o padrão regex na coluna "${rule.columnName}".`,
+            details: `${invalid} de ${total} linhas violam o padrão regex na coluna "${columnName}".`,
             rawValue: invalid,
             totalRecords: total,
           });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -24,11 +24,11 @@ export default function ExecutiveReport() {
   const utils = trpc.useUtils();
   
   const { data: metrics, isLoading: isMetricsLoading } = trpc.executiveMetrics.getMetrics.useQuery();
-  const { data: syncConfig, isLoading: isConfigLoading } = trpc.syncJob.getConfig.useQuery(undefined, {
-    onSuccess: (data) => {
-      if (data?.cronExpression) setCronInput(data.cronExpression);
-    }
-  });
+  const { data: syncConfig, isLoading: isConfigLoading } = trpc.syncJob.getConfig.useQuery();
+
+  useEffect(() => {
+    if (syncConfig?.cronExpression) setCronInput(syncConfig.cronExpression);
+  }, [syncConfig?.cronExpression]);
 
   const updateConfig = trpc.syncJob.updateConfig.useMutation({
     onSuccess: () => {

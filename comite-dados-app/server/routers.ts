@@ -3479,9 +3479,12 @@ const connectorsRouter = router({
           return { success: false, message: "Adaptador não encontrado." };
         }
         const ok = await adapter.testConnection();
-        const msg = ok ? "Conexão bem-sucedida" : "Falha ao conectar";
-        await db.saveConnectorTestResult(input.id, ok, msg);
-        return { success: ok, message: msg };
+        const isOk = typeof ok === "boolean" ? ok : ok.ok;
+        const msg = typeof ok === "boolean"
+          ? (isOk ? "Conexão bem-sucedida" : "Falha ao conectar")
+          : (ok.message ?? (isOk ? "Conexão bem-sucedida" : "Falha ao conectar"));
+        await db.saveConnectorTestResult(input.id, isOk, msg);
+        return { success: isOk, message: msg };
       } catch (err: any) {
         const msg = err?.message ?? "Erro desconhecido";
         await db.saveConnectorTestResult(input.id, false, msg);
@@ -4087,13 +4090,11 @@ const aiGovernanceRouter = router({
         }
       }
 
-      // Atualiza o risco do agente se ele falhar
-      if (!passed) {
-        await db.updateLlmAgent(input.agentId, { riskScore });
-      }
+      // O score é devolvido ao cliente; llm_agents não possui coluna para persistí-lo.
 
       return {
         passed,
+        riskScore,
         attackerPayload,
         modelResponse,
         timestamp: new Date()

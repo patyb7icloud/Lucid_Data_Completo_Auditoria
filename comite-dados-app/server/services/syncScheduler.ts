@@ -1,10 +1,10 @@
-import cron from "node-cron";
+import cron, { type ScheduledTask } from "node-cron";
 import { getDb } from "../db";
 import { systemSettings } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { DatabricksAdapter } from "../adapters/DatabricksAdapter";
 
-let currentTask: cron.ScheduledTask | null = null;
+let currentTask: ScheduledTask | null = null;
 
 export async function scheduleSyncJob() {
   const db = await getDb();

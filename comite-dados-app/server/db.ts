@@ -25,7 +25,7 @@ import {
   dataLineage, InsertDataLineage,
   dataQualityChecks, InsertDataQualityCheck,
   accessRequests, InsertAccessRequest, AccessRequest,
-  qualityRules, InsertQualityRule,
+  qualityDimensions, qualityRules, InsertQualityRule,
   auditLog, InsertAuditLog,
   businessGlossary, InsertBusinessGlossaryTerm,
   organizations, InsertOrganization,
@@ -51,7 +51,7 @@ import {
 } from "../drizzle/schema";
 
 // Alias para compatibilidade com adapters de qualidade
-export type SelectQualityRule = QualityRule;
+export type SelectQualityRule = QualityRule & { dimensionName: string | null };
 
 import { ENV } from './_core/env';
 
@@ -1761,7 +1761,23 @@ export async function createDataQualityCheck(data: InsertDataQualityCheck) {
 export async function getQualityRules(assetId: number) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(qualityRules).where(eq(qualityRules.assetId, assetId));
+  return db
+    .select({
+      id: qualityRules.id,
+      dimensionId: qualityRules.dimensionId,
+      assetId: qualityRules.assetId,
+      domainId: qualityRules.domainId,
+      isGlobal: qualityRules.isGlobal,
+      expressionJson: qualityRules.expressionJson,
+      threshold: qualityRules.threshold,
+      isActive: qualityRules.isActive,
+      createdAt: qualityRules.createdAt,
+      updatedAt: qualityRules.updatedAt,
+      dimensionName: qualityDimensions.name,
+    })
+    .from(qualityRules)
+    .leftJoin(qualityDimensions, eq(qualityRules.dimensionId, qualityDimensions.id))
+    .where(eq(qualityRules.assetId, assetId));
 }
 
 export async function upsertQualityRule(data: InsertQualityRule) {
@@ -3180,6 +3196,12 @@ export async function getAnalysisResultsBySession(sessionId: number) {
 }
 
 // ─── AI Governance & LLMOps (AI TRiSM) ───────────────────────────────────────
+export async function getLlmAgentById(id: number) {
+  const dbConn = await getDb();
+  if (!dbConn) return null;
+  const rows = await dbConn.select().from(llmAgents).where(eq(llmAgents.id, id));
+  return rows[0] ?? null;
+}
 export async function getLlmAgents() {
   const dbConn = await getDb();
   if (!dbConn) return [];

@@ -21,6 +21,7 @@ interface SlaConfig {
   entityType: "asset" | "domain" | "global";
   entityId?: number | null;
   maxUpdateDays?: number | null;
+  maxAccessResponseDays?: number | null;
   minQualityScore?: number | null;
   alertEmails?: string | null;
   webhookUrl?: string | null;

@@ -109,10 +109,21 @@ export function getAuditoriaDb() {
   return _dbAuditoria;
 }
 
-// Alias para compatibilidade com imports existentes
+// Encaminhamento tipado para compatibilidade com imports existentes.
+type AuditoriaDb = ReturnType<typeof drizzle>;
+type InsertTable = Parameters<AuditoriaDb["insert"]>[0];
+type UpdateTable = Parameters<AuditoriaDb["update"]>[0];
+type DeleteTable = Parameters<AuditoriaDb["delete"]>[0];
+
+function requireAuditoriaDb(): AuditoriaDb {
+  const database = getAuditoriaDb();
+  if (!database) throw new Error("Database not available");
+  return database;
+}
+
 export const db = {
-  select: (...args: any[]) => getAuditoriaDb()?.select(...args),
-  insert: (...args: any[]) => getAuditoriaDb()?.insert(...args),
-  update: (...args: any[]) => getAuditoriaDb()?.update(...args),
-  delete: (...args: any[]) => getAuditoriaDb()?.delete(...args),
+  select: () => requireAuditoriaDb().select(),
+  insert: (table: InsertTable) => requireAuditoriaDb().insert(table),
+  update: (table: UpdateTable) => requireAuditoriaDb().update(table),
+  delete: (table: DeleteTable) => requireAuditoriaDb().delete(table),
 };

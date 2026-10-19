@@ -76,6 +76,7 @@ export default function DataQuality() {
     { enabled: !!historyAssetId }
   );
   const { data: globalDimensions } = trpc.governance.getGlobalQualityDimensions.useQuery();
+  const { data: qualityDimensions } = trpc.governance.getQualityDimensions.useQuery();
   const { data: assetAttributes } = trpc.governance.getAttributes.useQuery(
     { assetId: selectedAsset?.id ?? 0 },
     { enabled: !!selectedAsset }
@@ -428,7 +429,8 @@ export default function DataQuality() {
           
           <div className="space-y-6 py-4">
             <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
-              {globalDimensions?.map((dim) => {
+              {qualityDimensions?.map((dim) => {
+                const metricName = Object.entries(DIMENSION_CONFIG).find(([, cfg]) => cfg.label === dim.name)?.[0] ?? dim.name.toLowerCase();
                 const draft = draftRules[dim.id] || { threshold: 95, json: "" };
                 
                 let checkedCols: string[] = [];
@@ -440,21 +442,21 @@ export default function DataQuality() {
                 if (draft.json) {
                   try {
                     const parsed = JSON.parse(draft.json);
-                    if (dim.metricName === "completude" && parsed.and && Array.isArray(parsed.and)) {
+                    if (metricName === "completude" && parsed.and && Array.isArray(parsed.and)) {
                       checkedCols = parsed.and.filter((c: any) => c.operator === "isNotNull" && c.field).map((c: any) => c.field);
                     }
-                    if (dim.metricName === "unicidade" && parsed.field && parsed.operator === "isUnique") {
+                    if (metricName === "unicidade" && parsed.field && parsed.operator === "isUnique") {
                       uniqueCol = parsed.field;
                     }
-                    if (dim.metricName === "atualidade" && parsed.field && parsed.operator === "isDateColumn") {
+                    if (metricName === "atualidade" && parsed.field && parsed.operator === "isDateColumn") {
                       dateCol = parsed.field;
                     }
-                    if (dim.metricName === "validade" && parsed.and && Array.isArray(parsed.and)) {
+                    if (metricName === "validade" && parsed.and && Array.isArray(parsed.and)) {
                       parsed.and.forEach((c: any) => {
                         if (c.operator === "regex" && c.field) regexCols[c.field] = c.value;
                       });
                     }
-                    if (dim.metricName === "consistencia" && parsed.and && Array.isArray(parsed.and)) {
+                    if (metricName === "consistencia" && parsed.and && Array.isArray(parsed.and)) {
                       parsed.and.forEach((c: any) => {
                         if (c.field && c.operator && c.value !== undefined) consCols[c.field] = { op: c.operator, val: c.value };
                       });
@@ -542,7 +544,7 @@ export default function DataQuality() {
                           </TabsList>
                           
                           <TabsContent value="visual" className="space-y-4">
-                             {dim.metricName === "completude" && (
+                             {metricName === "completude" && (
                                <div className="grid grid-cols-2 gap-3 max-h-48 overflow-y-auto p-4 bg-white rounded-lg border border-gray-200 shadow-inner">
                                   {assetAttributes?.map(attr => (
                                     <div key={attr.id} className="flex items-center space-x-2">
@@ -565,7 +567,7 @@ export default function DataQuality() {
                                </div>
                              )}
 
-                             {dim.metricName === "unicidade" && (
+                             {metricName === "unicidade" && (
                                <div className="space-y-3 p-4 bg-white rounded-lg border border-gray-200 shadow-inner">
                                  <p className="text-xs text-gray-500 font-medium">Selecione a coluna que atua como chave primária ou que não deve conter valores duplicados.</p>
                                  <Select value={uniqueCol || "none"} onValueChange={setUniqueCol}>
@@ -582,7 +584,7 @@ export default function DataQuality() {
                                </div>
                              )}
 
-                             {dim.metricName === "atualidade" && (
+                             {metricName === "atualidade" && (
                                <div className="space-y-3 p-4 bg-white rounded-lg border border-gray-200 shadow-inner">
                                  <p className="text-xs text-gray-500 font-medium">Selecione a coluna de data (timestamp) que indica a última modificação do registro.</p>
                                  <Select value={dateCol || "none"} onValueChange={setDateCol}>
@@ -591,7 +593,7 @@ export default function DataQuality() {
                                    </SelectTrigger>
                                    <SelectContent>
                                      <SelectItem value="none">Nenhuma</SelectItem>
-                                     {assetAttributes?.filter(a => a.dataType.toLowerCase().includes('date') || a.dataType.toLowerCase().includes('time') || a.dataType.toLowerCase().includes('timestamp')).map(attr => (
+                                     {assetAttributes?.filter(a => (a.dataType ?? '').toLowerCase().includes('date') || (a.dataType ?? '').toLowerCase().includes('time') || (a.dataType ?? '').toLowerCase().includes('timestamp')).map(attr => (
                                         <SelectItem key={attr.id} value={attr.name}>{attr.name} <span className="text-gray-400">({attr.dataType})</span></SelectItem>
                                      ))}
                                    </SelectContent>
@@ -599,7 +601,7 @@ export default function DataQuality() {
                                </div>
                              )}
 
-                             {dim.metricName === "validade" && (
+                             {metricName === "validade" && (
                                <div className="space-y-3 p-4 bg-white rounded-lg border border-gray-200 shadow-inner">
                                  <p className="text-xs text-gray-500 font-medium">Defina um formato válido (Regex) para colunas específicas (ex: e-mail, CPF, CNPJ).</p>
                                  <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
@@ -640,11 +642,11 @@ export default function DataQuality() {
                                </div>
                              )}
 
-                             {dim.metricName === "consistencia" && (
+                             {metricName === "consistencia" && (
                                <div className="space-y-3 p-4 bg-white rounded-lg border border-gray-200 shadow-inner">
                                  <p className="text-xs text-gray-500 font-medium">Defina limites numéricos para colunas.</p>
                                  <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
-                                   {assetAttributes?.filter(a => a.dataType.toLowerCase().includes('int') || a.dataType.toLowerCase().includes('float') || a.dataType.toLowerCase().includes('numeric') || a.dataType.toLowerCase().includes('decimal')).map(attr => (
+                                   {assetAttributes?.filter(a => (a.dataType ?? '').toLowerCase().includes('int') || (a.dataType ?? '').toLowerCase().includes('float') || (a.dataType ?? '').toLowerCase().includes('numeric') || (a.dataType ?? '').toLowerCase().includes('decimal')).map(attr => (
                                       <div key={attr.id} className="flex gap-2 items-center bg-gray-50 p-2 rounded-md border border-gray-100">
                                          <span className="text-xs font-bold w-1/3 truncate text-gray-700" title={attr.name}>{attr.name}</span>
                                          <Select value={consCols[attr.name]?.op || "none"} onValueChange={(v) => setCons(attr.name, v, consCols[attr.name]?.val || "0")}>
@@ -666,7 +668,7 @@ export default function DataQuality() {
                                          />
                                       </div>
                                    ))}
-                                   {!assetAttributes?.filter(a => a.dataType.toLowerCase().includes('int') || a.dataType.toLowerCase().includes('float') || a.dataType.toLowerCase().includes('numeric') || a.dataType.toLowerCase().includes('decimal'))?.length && (
+                                   {!assetAttributes?.filter(a => (a.dataType ?? '').toLowerCase().includes('int') || (a.dataType ?? '').toLowerCase().includes('float') || (a.dataType ?? '').toLowerCase().includes('numeric') || (a.dataType ?? '').toLowerCase().includes('decimal'))?.length && (
                                      <div className="text-xs text-gray-500 text-center py-4">Nenhuma coluna numérica detectada neste ativo.</div>
                                    )}
                                  </div>
@@ -678,7 +680,7 @@ export default function DataQuality() {
                             <div className="mt-2 space-y-2">
                               <label className="text-[10px] font-bold uppercase text-gray-400 flex items-center gap-2">
                                 Condição JSON (Regra Engine)
-                                <Info className="h-3 w-3 text-blue-500 cursor-help" title={'Ex: {"field":"description", "operator":"isNotNull"}'} />
+                                <Info className="h-3 w-3 text-blue-500 cursor-help" aria-label='Exemplo de condição JSON' />
                               </label>
                               <textarea
                                 className="w-full text-xs font-mono p-2 border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 min-h-[60px]"

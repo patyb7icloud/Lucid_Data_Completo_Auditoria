@@ -1,3 +1,5 @@
+export type Language = "pt" | "en";
+
 const pt = {
   common: {
     lightTheme: "Tema Claro",
