@@ -12,6 +12,7 @@ import {
   smallint,
   serial,
   date,
+  numeric,
 } from "drizzle-orm/pg-core";
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
@@ -242,6 +243,7 @@ export const aiChatHistory = pgTable("ai_chat_history", {
   id: serial("id").primaryKey(),
   sessionId: varchar("sessionId", { length: 128 }).notNull(),
   userId: integer("userId"),
+  organizationId: integer("organizationId").default(1).notNull(),
   role: aiChatRoleEnum("role").notNull(),
   content: text("content").notNull(),
   context: jsonb("context"),
@@ -255,6 +257,7 @@ export type InsertAiChatHistory = typeof aiChatHistory.$inferInsert;
 export const servicenowTickets = pgTable("servicenow_tickets", {
   id: serial("id").primaryKey(),
   ticketNumber: varchar("ticketNumber", { length: 64 }).notNull(),
+  organizationId: integer("organizationId").default(1).notNull(),
   title: varchar("title", { length: 512 }).notNull(),
   description: text("description"),
   status: varchar("status", { length: 64 }),
@@ -545,6 +548,7 @@ export type InsertQualityRule = typeof qualityRules.$inferInsert;
 export const accessRequests = pgTable("access_requests", {
   id: serial("id").primaryKey(),
   ticketNumber: varchar("ticketNumber", { length: 64 }).notNull(),
+  organizationId: integer("organizationId").default(1).notNull(),
   assetId: integer("assetId").notNull(),
   requesterId: integer("requesterId"),
   requesterName: varchar("requesterName", { length: 256 }),
@@ -558,10 +562,12 @@ export const accessRequests = pgTable("access_requests", {
   envolveTerceiros: boolean("envolveTerceiros").default(false),
   statusOwner: accessStatusOwnerEnum("statusOwner").default("pendente"),
   ownerApprovedAt: timestamp("ownerApprovedAt"),
+  ownerApprovedByUserId: integer("ownerApprovedByUserId"),
   ownerComment: text("ownerComment"),
   ownerId: integer("ownerId"),
   statusSteward: accessStatusStewardEnum("statusSteward").default("aguardando"),
   stewardApprovedAt: timestamp("stewardApprovedAt"),
+  stewardApprovedByUserId: integer("stewardApprovedByUserId"),
   stewardComment: text("stewardComment"),
   stewardId: integer("stewardId"),
   status: accessStatusEnum("status").default("pendente_owner"),
@@ -620,6 +626,7 @@ export type InsertQualityScoreHistory = typeof qualityScoreHistory.$inferInsert;
 // ─── Audit Log ───────────────────────────────────────────────────────────────
 export const auditLog = pgTable("audit_log", {
   id: serial("id").primaryKey(),
+  organizationId: integer("organizationId").default(1).notNull(),
   userId: integer("userId"),
   userEmail: varchar("userEmail", { length: 320 }),
   userName: varchar("userName", { length: 256 }),
@@ -639,6 +646,7 @@ export type InsertAuditLog = typeof auditLog.$inferInsert;
 // ─── Business Glossary ────────────────────────────────────────────────────────
 export const businessGlossary = pgTable("business_glossary", {
   id: serial("id").primaryKey(),
+  organizationId: integer("organizationId").default(1).notNull(),
   term: varchar("term", { length: 256 }).notNull(),
   definition: text("definition").notNull(),
   abbreviation: varchar("abbreviation", { length: 64 }),
@@ -664,6 +672,7 @@ export type InsertBusinessGlossaryTerm = typeof businessGlossary.$inferInsert;
 // ─── SLA de Dados ─────────────────────────────────────────────────────────────
 export const slaConfigs = pgTable("sla_configs", {
   id: serial("id").primaryKey(),
+  organizationId: integer("organizationId").default(1).notNull(),
   name: varchar("name", { length: 256 }).notNull(),
   description: text("description"),
   entityType: slaEntityTypeEnum("entityType").notNull().default("global"),
@@ -686,6 +695,7 @@ export type InsertSlaConfig = typeof slaConfigs.$inferInsert;
 
 export const slaViolations = pgTable("sla_violations", {
   id: serial("id").primaryKey(),
+  organizationId: integer("organizationId").default(1).notNull(),
   slaConfigId: integer("slaConfigId").notNull(),
   entityType: slaViolEntityEnum("entityType").notNull(),
   entityId: integer("entityId").notNull(),
@@ -762,6 +772,7 @@ export type InsertSsoConfig = typeof ssoConfigs.$inferInsert;
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 export const apiKeys = pgTable("api_keys", {
   id: serial("id").primaryKey(),
+  organizationId: integer("organizationId").default(1).notNull(),
   name: varchar("name", { length: 256 }).notNull(),
   keyHash: varchar("keyHash", { length: 256 }).notNull().unique(),
   keyPrefix: varchar("keyPrefix", { length: 8 }).notNull(),
@@ -859,6 +870,7 @@ export type InsertDsarRequest = typeof dsarRequests.$inferInsert;
 // ─── Connector Configs ────────────────────────────────────────────────────────
 export const connectorConfigs = pgTable("connector_configs", {
   id: serial("id").primaryKey(),
+  organizationId: integer("organizationId").default(1).notNull(),
   connectorType: varchar("connectorType", { length: 64 }).notNull(),
   name: varchar("name", { length: 256 }).notNull(),
   configJson: jsonb("configJson").notNull(),
@@ -1119,6 +1131,7 @@ export const syncStatusEnum      = pgEnum("sync_status",       ["idle", "running
 // ─── MLOps: Registro de Modelos ───────────────────────────────────────────────
 export const mlModels = pgTable("ml_models", {
   id:             serial("id").primaryKey(),
+  organizationId: integer("organization_id").default(1).notNull(),
   name:           varchar("name", { length: 256 }).notNull(),
   version:        varchar("version", { length: 64 }).notNull().default("1.0.0"),
   description:    text("description"),
@@ -1155,6 +1168,7 @@ export type InsertMlModel = typeof mlModels.$inferInsert;
 // ─── MLOps: Histórico de Métricas ─────────────────────────────────────────────
 export const mlModelMetrics = pgTable("ml_model_metrics", {
   id:              serial("id").primaryKey(),
+  organizationId: integer("organization_id").default(1).notNull(),
   modelId:         integer("model_id").notNull(),
   accuracy:        real("accuracy"),
   f1Score:         real("f1_score"),
@@ -1171,6 +1185,7 @@ export type InsertMlModelMetric = typeof mlModelMetrics.$inferInsert;
 // ─── MLOps: Log de Predições ──────────────────────────────────────────────────
 export const mlPredictionLogs = pgTable("ml_prediction_logs", {
   id:          serial("id").primaryKey(),
+  organizationId: integer("organization_id").default(1).notNull(),
   modelId:     integer("model_id").notNull(),
   inputHash:   varchar("input_hash", { length: 64 }),
   outputLabel: text("output_label"),
@@ -1187,15 +1202,42 @@ export const mlPredictionLogs = pgTable("ml_prediction_logs", {
 });
 export type MlPredictionLog = typeof mlPredictionLogs.$inferSelect;
 
+// ─── Ledger de invocações LLM (sem prompts, respostas ou credenciais) ─────────
+export const llmInvocationLogs = pgTable("llm_invocation_logs", {
+  id: serial("id").primaryKey(),
+  organizationId: integer("organization_id"),
+  userId: integer("user_id"),
+  operation: varchar("operation", { length: 128 }).notNull(),
+  provider: varchar("provider", { length: 64 }).notNull(),
+  model: varchar("model", { length: 256 }).notNull(),
+  requestId: varchar("request_id", { length: 128 }),
+  providerRequestId: varchar("provider_request_id", { length: 256 }),
+  status: varchar("status", { length: 32 }).notNull(),
+  inputTokens: integer("input_tokens"),
+  outputTokens: integer("output_tokens"),
+  tokenSource: varchar("token_source", { length: 32 }).notNull().default("unknown"),
+  estimatedCostUsd: numeric("estimated_cost_usd", { precision: 18, scale: 8 }),
+  billedCostUsd: numeric("billed_cost_usd", { precision: 18, scale: 8 }),
+  currency: varchar("currency", { length: 3 }).notNull().default("USD"),
+  costProvenance: varchar("cost_provenance", { length: 40 }).notNull().default("not_available"),
+  pricingVersion: varchar("pricing_version", { length: 128 }),
+  latencyMs: integer("latency_ms"),
+  errorClass: varchar("error_class", { length: 128 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export type LlmInvocationLog = typeof llmInvocationLogs.$inferSelect;
+
 // ─── AI Pipeline: Projetos de IA ──────────────────────────────────────────────
 export const aiProjects = pgTable("ai_projects", {
   id:              serial("id").primaryKey(),
+  organizationId: integer("organization_id").default(1).notNull(),
   name:            varchar("name", { length: 256 }).notNull(),
   description:     text("description"),
   department:      varchar("department", { length: 128 }),
   gate:            aiGateEnum("gate").default("G0").notNull(),
   status:          aiProjectStatusEnum("status").default("active").notNull(),
   ownerId:         integer("owner_id"),
+  createdById:     integer("created_by_id"),
   riskLevel:       riskLevelEnum("risk_level").default("medio").notNull(),
   complianceScore: integer("compliance_score").default(0),
   
@@ -1204,7 +1246,12 @@ export const aiProjects = pgTable("ai_projects", {
   servicenowTicket: varchar("servicenow_ticket", { length: 128 }),
   azureDevopsUrl:   varchar("azure_devops_url", { length: 512 }),
   termsAccepted:   boolean("terms_accepted").default(false).notNull(),
+  termsAcceptedById: integer("terms_accepted_by_id"),
+  termsAcceptedAt: timestamp("terms_accepted_at"),
   goNoGoStatus:    varchar("go_no_go_status", { length: 32 }).default("pending").notNull(),
+  decisionById:   integer("decision_by_id"),
+  decisionAt:     timestamp("decision_at"),
+  decisionReason: text("decision_reason"),
 
   createdAt:       timestamp("created_at").defaultNow().notNull(),
   updatedAt:       timestamp("updated_at").defaultNow().notNull(),
@@ -1214,19 +1261,39 @@ export type InsertAiProject = typeof aiProjects.$inferInsert;
 
 export const aiProjectChecklists = pgTable("ai_project_checklists", {
   id:              serial("id").primaryKey(),
+  organizationId: integer("organization_id").default(1).notNull(),
   projectId:       integer("project_id").notNull(),
   gate:            aiGateEnum("gate").notNull(),
+  itemKey:         varchar("item_key", { length: 128 }),
   itemText:        text("item_text").notNull(),
   evidenceLink:    varchar("evidence_link", { length: 1024 }),
+  checked:         boolean("checked").default(true).notNull(),
+  checkedById:     integer("checked_by_id"),
   checkedAt:       timestamp("checked_at").defaultNow().notNull(),
   checkedBy:       varchar("checked_by", { length: 256 }),
 });
 export type AiProjectChecklist = typeof aiProjectChecklists.$inferSelect;
 export type InsertAiProjectChecklist = typeof aiProjectChecklists.$inferInsert;
 
+export const aiProjectDecisions = pgTable("ai_project_decisions", {
+  id: serial("id").primaryKey(),
+  organizationId: integer("organization_id").notNull(),
+  projectId: integer("project_id").notNull(),
+  decisionType: varchar("decision_type", { length: 32 }).notNull(),
+  decision: varchar("decision", { length: 32 }).notNull(),
+  fromGate: aiGateEnum("from_gate"),
+  toGate: aiGateEnum("to_gate"),
+  reason: text("reason").notNull(),
+  evidence: jsonb("evidence").$type<Array<{ itemKey: string; evidenceLink: string }>>(),
+  actorId: integer("actor_id").notNull(),
+  actorRole: varchar("actor_role", { length: 32 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // ─── AI Risk: Avaliações de Risco ─────────────────────────────────────────────
 export const aiRiskAssessments = pgTable("ai_risk_assessments", {
   id:              serial("id").primaryKey(),
+  organizationId: integer("organization_id").default(1).notNull(),
   modelId:         integer("model_id"),
   modelName:       varchar("model_name", { length: 256 }).notNull(),
   title:           varchar("title", { length: 512 }).notNull(),
@@ -1259,6 +1326,7 @@ export type InsertAiRiskAssessment = typeof aiRiskAssessments.$inferInsert;
 // ─── AI Risk: Conformidade Regulatória ────────────────────────────────────────
 export const aiComplianceChecks = pgTable("ai_compliance_checks", {
   id:           serial("id").primaryKey(),
+  organizationId: integer("organization_id").default(1).notNull(),
   modelId:      integer("model_id"),
   modelName:    varchar("model_name", { length: 256 }).notNull(),
   framework:    complianceFrameworkEnum("framework").notNull(),
@@ -1268,6 +1336,13 @@ export const aiComplianceChecks = pgTable("ai_compliance_checks", {
   evidence:     text("evidence"),
   notes:        text("notes"),
   checkedById:  integer("checked_by_id"),
+  status:       varchar("status", { length: 32 }).notNull().default("not_assessed"),
+  reviewerId:   integer("reviewer_id"),
+  reviewedAt:   timestamp("reviewed_at"),
+  reviewNotes:  text("review_notes"),
+  ruleVersion:  varchar("rule_version", { length: 64 }),
+  automated:    boolean("automated").default(false).notNull(),
+  evidenceVerified: boolean("evidence_verified").default(false).notNull(),
   checkedAt:    timestamp("checked_at").defaultNow().notNull(),
   nextReviewAt: timestamp("next_review_at"),
   createdAt:    timestamp("created_at").defaultNow().notNull(),
@@ -1278,6 +1353,7 @@ export type InsertAiComplianceCheck = typeof aiComplianceChecks.$inferInsert;
 // ─── AI Risk: Histórico de Score ──────────────────────────────────────────────
 export const aiRiskHistory = pgTable("ai_risk_history", {
   id:            serial("id").primaryKey(),
+  organizationId: integer("organization_id").default(1).notNull(),
   modelId:       integer("model_id"),
   modelName:     varchar("model_name", { length: 256 }).notNull(),
   riskScore:     integer("risk_score").notNull(),
@@ -1286,6 +1362,84 @@ export const aiRiskHistory = pgTable("ai_risk_history", {
   recordedAt:    timestamp("recorded_at").defaultNow().notNull(),
 });
 export type AiRiskHistory = typeof aiRiskHistory.$inferSelect;
+
+// ─── Avaliações de fairness sobre contagens agregadas, sujeitas a revisão ─────
+export const aiFairnessAssessments = pgTable("ai_fairness_assessments", {
+  id: serial("id").primaryKey(),
+  organizationId: integer("organization_id").notNull(),
+  modelId: integer("model_id"),
+  modelName: varchar("model_name", { length: 256 }).notNull(),
+  modelVersion: varchar("model_version", { length: 64 }).notNull(),
+  datasetName: varchar("dataset_name", { length: 256 }).notNull(),
+  datasetVersion: varchar("dataset_version", { length: 128 }).notNull(),
+  protectedAttribute: varchar("protected_attribute", { length: 128 }).notNull(),
+  decisionThreshold: real("decision_threshold"),
+  minimumGroupSize: integer("minimum_group_size").notNull().default(20),
+  groups: jsonb("groups").$type<Array<Record<string, number | string | null>>>().notNull(),
+  metrics: jsonb("metrics").$type<Record<string, number | null>>().notNull(),
+  methodology: text("methodology").notNull(),
+  status: varchar("status", { length: 32 }).notNull().default("pending_review"),
+  createdById: integer("created_by_id").notNull(),
+  reviewedById: integer("reviewed_by_id"),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewNotes: text("review_notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export type AiFairnessAssessment = typeof aiFairnessAssessments.$inferSelect;
+
+export const slaEvaluationRuns = pgTable("sla_evaluation_runs", {
+  id: serial("id").primaryKey(),
+  organizationId: integer("organizationId").notNull(),
+  runId: varchar("runId", { length: 64 }).notNull().unique(),
+  source: varchar("source", { length: 32 }).notNull(),
+  status: varchar("status", { length: 32 }).notNull(),
+  startedAt: timestamp("startedAt").defaultNow().notNull(),
+  finishedAt: timestamp("finishedAt"),
+  actorId: integer("actorId"),
+  details: jsonb("details").$type<Record<string, unknown>>(),
+});
+export type SlaEvaluationRun = typeof slaEvaluationRuns.$inferSelect;
+
+export const externalProjectSyncs = pgTable("external_project_syncs", {
+  id: serial("id").primaryKey(),
+  organizationId: integer("organization_id").notNull(),
+  projectId: integer("project_id").notNull(),
+  provider: varchar("provider", { length: 32 }).notNull(),
+  status: varchar("status", { length: 32 }).notNull().default("pending"),
+  remoteId: varchar("remote_id", { length: 128 }),
+  remoteNumber: varchar("remote_number", { length: 128 }),
+  remoteUrl: text("remote_url"),
+  idempotencyKey: varchar("idempotency_key", { length: 256 }).notNull(),
+  attempts: integer("attempts").default(0).notNull(),
+  lastAttemptAt: timestamp("last_attempt_at"),
+  lastSuccessAt: timestamp("last_success_at"),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type ExternalProjectSync = typeof externalProjectSyncs.$inferSelect;
+
+export const deploymentRequests = pgTable("deployment_requests", {
+  id: serial("id").primaryKey(),
+  organizationId: integer("organization_id").notNull(),
+  modelId: integer("model_id").notNull(),
+  action: varchar("action", { length: 16 }).notNull().default("deploy"),
+  targetEnvironment: varchar("target_environment", { length: 64 }).notNull(),
+  status: varchar("status", { length: 32 }).notNull().default("pending_approval"),
+  pipelineId: integer("pipeline_id"),
+  azureRunId: integer("azure_run_id"),
+  rollbackOfRequestId: integer("rollback_of_request_id"),
+  reason: text("reason").notNull(),
+  requestedById: integer("requested_by_id").notNull(),
+  approvedById: integer("approved_by_id"),
+  approvalReason: text("approval_reason"),
+  requestedAt: timestamp("requested_at").defaultNow().notNull(),
+  approvedAt: timestamp("approved_at"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  lastError: text("last_error"),
+});
+export type DeploymentRequest = typeof deploymentRequests.$inferSelect;
 
 // ─── Integrações BI/SAP: Conectores ───────────────────────────────────────────
 export const biConnectors = pgTable("bi_connectors", {
@@ -1480,6 +1634,3 @@ export const llmAgentGaps = pgTable("llm_agent_gaps", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 export type LlmAgentGap = typeof llmAgentGaps.$inferSelect;
-
-
-

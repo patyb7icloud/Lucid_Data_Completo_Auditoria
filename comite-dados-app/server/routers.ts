@@ -9,6 +9,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router, stewardProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { invokeLLM } from "./_core/llm";
+import { evaluateSla } from "./slaEvaluator";
 import * as db from "./db";
 import { cache, TTL } from "./cache";
 import { triggerWorkflow, recordDecision, cancelWorkflow } from "./workflowEngine";
@@ -66,6 +67,12 @@ import { DatabricksAdapter } from "./adapters/DatabricksAdapter";
 import { executiveMetricsRouter } from "./executiveMetricsRouter";
 import { aiGatewayRouter } from "./aiGatewayRouter";
 import { syncJobRouter } from "./syncJobRouter";
+
+async function assertAssetInOrganization(assetId: number, organizationId: number) {
+  const asset = await db.getDataAssetById(assetId, organizationId);
+  if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "Ativo não encontrado nesta organização." });
+  return asset;
+}
 
 // ─── Domains Router ───────────────────────────────────────────────────────────
 const domainsRouter = router({
@@ -340,7 +347,8 @@ const aiRouter = router({
       currentPhase: z.string().optional(),
     }).optional(),
   })).mutation(async ({ input, ctx }) => {
-    const history = await db.getAiChatHistory(input.sessionId);
+    const organizationId = ctx.user.organizationId ?? 1;
+    const history = await db.getAiChatHistory(input.sessionId, organizationId, ctx.user.id);
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
       {
         role: 'system',
@@ -367,6 +375,7 @@ Contexto atual: ${JSON.stringify(input.context || {})}`,
     await db.saveAiMessage({
       sessionId: input.sessionId,
       userId: ctx.user.id,
+      organizationId,
       role: 'user',
       content: input.message,
       context: input.context,
@@ -379,24 +388,25 @@ Contexto atual: ${JSON.stringify(input.context || {})}`,
     await db.saveAiMessage({
       sessionId: input.sessionId,
       userId: ctx.user.id,
+      organizationId,
       role: 'assistant',
       content: assistantMessage,
     });
 
     return { message: assistantMessage };
   }),
-  history: protectedProcedure.input(z.object({ sessionId: z.string() })).query(({ input }) =>
-    db.getAiChatHistory(input.sessionId)
+  history: protectedProcedure.input(z.object({ sessionId: z.string() })).query(({ input, ctx }) =>
+    db.getAiChatHistory(input.sessionId, ctx.user.organizationId ?? 1, ctx.user.id)
   ),
 });
 
 // ─── ServiceNow Router ────────────────────────────────────────────────────────
 const servicenowRouter = router({
-  getTickets: publicProcedure.input(z.object({ domainId: z.number().optional() })).query(({ input }) =>
-    db.getServiceNowTickets({ domainId: input.domainId })
+  getTickets: protectedProcedure.input(z.object({ domainId: z.number().optional() })).query(({ input, ctx }) =>
+    db.getServiceNowTickets({ domainId: input.domainId, organizationId: ctx.user.organizationId ?? 1 })
   ),
-  list: publicProcedure.input(z.object({ domainId: z.number().optional() })).query(({ input }) =>
-    db.getServicenowTickets(input.domainId)
+  list: protectedProcedure.input(z.object({ domainId: z.number().optional() })).query(({ input, ctx }) =>
+    db.getServicenowTickets(input.domainId, ctx.user.organizationId ?? 1)
   ),
   create: protectedProcedure.input(z.object({
     ticketNumber: z.string(),
@@ -409,7 +419,7 @@ const servicenowRouter = router({
     participantId: z.number().optional(),
     meetingId: z.number().optional(),
     externalUrl: z.string().optional(),
-  })).mutation(({ input }) => db.createServicenowTicket(input)),
+  })).mutation(({ input, ctx }) => db.createServicenowTicket({ ...input, organizationId: ctx.user.organizationId ?? 1 })),
   update: protectedProcedure.input(z.object({
     id: z.number(),
     status: z.string().optional(),
@@ -417,9 +427,9 @@ const servicenowRouter = router({
     assignedTo: z.string().optional(),
     title: z.string().optional(),
     description: z.string().optional(),
-  })).mutation(({ input }) => {
+  })).mutation(({ input, ctx }) => {
     const { id, ...data } = input;
-    return db.updateServicenowTicket(id, { ...data, syncedAt: new Date() });
+    return db.updateServicenowTicket(id, { ...data, syncedAt: new Date() }, ctx.user.organizationId ?? 1);
   }),
 });
 
@@ -1112,7 +1122,7 @@ const feedbackRouter = router({
 // ─── Governance Router ────────────────────────────────────────────────────────
 const governanceRouter = router({
   // Ativos de Dados
-  listAssets: publicProcedure.input(z.object({
+  listAssets: protectedProcedure.input(z.object({
     domainId: z.number().optional(),
     search: z.string().optional(),
     sensitivity: z.string().optional(),
@@ -1122,10 +1132,8 @@ const governanceRouter = router({
     offset: z.number().optional().default(0),
     organizationId: z.number().optional(),
   })).query(async ({ input, ctx }) => {
-    // Multi-tenancy enforcement: if user is not admin and has an org, force filter
-    const effectiveOrgId = (ctx.user?.role !== 'admin' && ctx.user?.organizationId) 
-      ? ctx.user.organizationId 
-      : input.organizationId;
+    // O tenant vem exclusivamente da sessão; organizationId fornecido pelo cliente é ignorado.
+    const effectiveOrgId = ctx.user.organizationId ?? 1;
 
     const params = { ...input, organizationId: effectiveOrgId };
 
@@ -1144,8 +1152,8 @@ const governanceRouter = router({
 
     return cache.wrap(cacheKey, () => db.getDataAssets(params), TTL.MEDIUM);
   }),
-  assetById: publicProcedure.input(z.object({ id: z.number() })).query(({ input }) =>
-    db.getDataAssetById(input.id)
+  assetById: protectedProcedure.input(z.object({ id: z.number() })).query(({ input, ctx }) =>
+    db.getDataAssetById(input.id, ctx.user.organizationId ?? 1)
   ),
   createAsset: protectedProcedure.input(z.object({
     name: z.string().min(1),
@@ -1170,7 +1178,7 @@ const governanceRouter = router({
       }
     }
     // ─────────────────────────────────────────────────────────────────────────
-    const result = await db.createDataAsset(input);
+    const result = await db.createDataAsset({ ...input, organizationId: orgId });
     await cache.flush("assets:"); // Invalida cache de listagem
     await db.createAuditLog({
       userId: ctx.user?.id, userEmail: ctx.user?.email, userName: ctx.user?.name,
@@ -1206,6 +1214,8 @@ const governanceRouter = router({
     businessValueScore: z.number().min(0).max(100).optional(),
   })).mutation(async ({ input, ctx }) => {
     const { id, ...data } = input;
+    const organizationId = ctx.user.organizationId ?? 1;
+    await assertAssetInOrganization(id, organizationId);
 
     // Data Contract Enforcement (Breaking Change protection)
     if (data.name) {
@@ -1218,7 +1228,7 @@ const governanceRouter = router({
       }
     }
 
-    const result = await db.updateDataAsset(id, data as any);
+    const result = await db.updateDataAsset(id, data as any, organizationId);
     await cache.flush("assets:"); // Invalida cache de listagem para ver refletido imediatamente
     await db.createAuditLog({
       userId: ctx.user?.id, userEmail: ctx.user?.email, userName: ctx.user?.name,
@@ -1230,8 +1240,10 @@ const governanceRouter = router({
   }),
   
   // Dicionário de Dados
-  getAttributes: publicProcedure.input(z.object({ assetId: z.number() })).query(async ({ input, ctx }) => {
-    const attrs = await db.getDataAttributes(input.assetId);
+  getAttributes: protectedProcedure.input(z.object({ assetId: z.number() })).query(async ({ input, ctx }) => {
+    const organizationId = ctx.user.organizationId ?? 1;
+    await assertAssetInOrganization(input.assetId, organizationId);
+    const attrs = await db.getDataAttributes(input.assetId, organizationId);
     
     // PII Masking: se o usuário não for admin ou steward, mascare valores sensíveis
     const canSeePii = ctx.user && (ctx.user.role === 'admin' || ctx.user.role === 'data_steward');
@@ -1248,9 +1260,11 @@ const governanceRouter = router({
   }),
 
   // PII Scanner: escaneia atributos de um ativo e retorna detecções de PII
-  scanPii: protectedProcedure.input(z.object({ assetId: z.number() })).mutation(async ({ input }) => {
+  scanPii: protectedProcedure.input(z.object({ assetId: z.number() })).mutation(async ({ input, ctx }) => {
+    const organizationId = ctx.user.organizationId ?? 1;
+    await assertAssetInOrganization(input.assetId, organizationId);
     const { scanTableForPii } = await import("./piiScanner");
-    const attrs = await db.getDataAttributes(input.assetId);
+    const attrs = await db.getDataAttributes(input.assetId, organizationId);
     const results = attrs.map(attr => ({
       attrId: attr.id,
       name: attr.name,
@@ -1260,8 +1274,8 @@ const governanceRouter = router({
     // Atualizar isPii automaticamente para os detectados
     await Promise.all(
       results
-        .filter(r => r.isPii && !r.isPii === false)
-        .map(r => db.updateDataAttribute(r.attrId, { isPii: true } as any).catch(() => null))
+        .filter(r => r.isPii)
+        .map(r => db.updateDataAttribute(r.attrId, { isPii: true } as any, organizationId).catch(() => null))
     );
     return {
       total: results.length,
@@ -1277,7 +1291,11 @@ const governanceRouter = router({
     businessRules: z.string().optional(),
     isPii: z.boolean().optional(),
     isKey: z.boolean().optional(),
-  })).mutation(({ input }) => db.createDataAttribute(input)),
+  })).mutation(async ({ input, ctx }) => {
+    const organizationId = ctx.user.organizationId ?? 1;
+    await assertAssetInOrganization(input.assetId, organizationId);
+    return db.createDataAttribute(input);
+  }),
 
   updateAttribute: protectedProcedure.input(z.object({
     id: z.number(),
@@ -1288,55 +1306,60 @@ const governanceRouter = router({
     verifiedBy: z.string().optional(),
     verifiedAt: z.date().optional(),
     aiSuggestion: z.string().optional(),
-  })).mutation(({ input }) => db.updateDataAttribute(input.id, {
-    ...input,
-    verifiedAt: input.verifiedAt || (input.isVerified ? new Date() : undefined)
-  })),
+  })).mutation(async ({ input, ctx }) => {
+    const organizationId = ctx.user.organizationId ?? 1;
+    if (!await db.getDataAttributeById(input.id, organizationId)) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Atributo não encontrado nesta organização." });
+    }
+    return db.updateDataAttribute(input.id, {
+      ...input,
+      verifiedAt: input.verifiedAt || (input.isVerified ? new Date() : undefined)
+    }, organizationId);
+  }),
 
   // Linhagem de Dados
-  getLineage: publicProcedure.input(z.object({ assetId: z.number() })).query(({ input }) =>
-    db.getDataLineage(input.assetId)
+  getLineage: protectedProcedure.input(z.object({ assetId: z.number() })).query(({ input, ctx }) =>
+    db.getDataLineage(input.assetId, ctx.user.organizationId ?? 1)
   ),
-  getAllLineage: publicProcedure.query(() => db.getAllDataLineage()),
+  getAllLineage: protectedProcedure.query(({ ctx }) => db.getAllDataLineage(ctx.user.organizationId ?? 1)),
 
   /** Parseia SQL e importa lineagem detectada automaticamente */
   importFromSql: protectedProcedure.input(z.object({
     sqlContent: z.string().min(10),
-  })).mutation(async ({ input }) => {
+  })).mutation(async ({ input, ctx }) => {
     const edges = parseSqlLineage(input.sqlContent);
     if (edges.length === 0) return { imported: 0, skipped: 0, detectedEdges: 0 };
-    const result = await db.importLineageEdges(edges);
+    const result = await db.importLineageEdges(edges, ctx.user.organizationId ?? 1);
     return { ...result, detectedEdges: edges.length };
   }),
 
   /** Parseia manifest.json do dbt e importa lineagem dos modelos */
   importFromDbt: protectedProcedure.input(z.object({
     manifestJson: z.string().min(10),
-  })).mutation(async ({ input }) => {
+  })).mutation(async ({ input, ctx }) => {
     const edges = parseDbtManifest(input.manifestJson);
     if (edges.length === 0) return { imported: 0, skipped: 0, detectedEdges: 0 };
-    const result = await db.importLineageEdges(edges);
+    const result = await db.importLineageEdges(edges, ctx.user.organizationId ?? 1);
     return { ...result, detectedEdges: edges.length };
   }),
   
   // Qualidade de Dados
-  getQuality: publicProcedure.input(z.object({ assetId: z.number() })).query(({ input }) =>
-    db.getDataQualityChecks(input.assetId)
+  getQuality: protectedProcedure.input(z.object({ assetId: z.number() })).query(({ input, ctx }) =>
+    db.getDataQualityChecks(input.assetId, ctx.user.organizationId ?? 1)
   ),
-  getQualityHistory: publicProcedure.input(z.object({ assetId: z.number(), days: z.number().optional().default(30) })).query(({ input }) =>
-    db.getDataQualityHistory(input.assetId, input.days)
+  getQualityHistory: protectedProcedure.input(z.object({ assetId: z.number(), days: z.number().optional().default(30) })).query(({ input, ctx }) =>
+    db.getDataQualityHistory(input.assetId, input.days, ctx.user.organizationId ?? 1)
   ),
-  getGlobalQualityDimensions: publicProcedure.query(() =>
-    db.getGlobalQualityDimensions()
+  getGlobalQualityDimensions: protectedProcedure.query(({ ctx }) =>
+    db.getGlobalQualityDimensions(ctx.user.organizationId ?? 1)
   ),
   tagAttributesWithLLM: protectedProcedure
     .input(z.object({ assetId: z.number() }))
-    .mutation(async ({ input }) => {
-      const attrs = await db.getDataAttributes(input.assetId);
+    .mutation(async ({ input, ctx }) => {
+      const organizationId = ctx.user.organizationId ?? 1;
+      const asset = await assertAssetInOrganization(input.assetId, organizationId);
+      const attrs = await db.getDataAttributes(input.assetId, organizationId);
       if (!attrs.length) return { tagged: 0, message: 'Nenhum atributo encontrado.' };
-
-      const allAssets = await db.getDataAssets();
-      const asset = allAssets.find(a => a.id === input.assetId);
 
       // Carrega políticas governadas para incluir no prompt
       const policies = await db.getTagPolicies();
@@ -1414,7 +1437,7 @@ ${tableData}`;
         const attr = attrs.find(a => a.name === col.name);
         if (!attr) continue;
         const suggestion = JSON.stringify({ tags: col.tags ?? [], businessRule: col.businessRule ?? '', sensitivity: col.sensitivity ?? 'publico' });
-        await db.updateDataAttribute(attr.id, { aiSuggestion: suggestion } as any);
+        await db.updateDataAttribute(attr.id, { aiSuggestion: suggestion } as any, organizationId);
         tagged++;
       }
 
@@ -1427,7 +1450,7 @@ ${tableData}`;
       }, 0);
       const assetSensitivity = RANK_TO_SENSITIVITY[maxRank] ?? 'publico';
       if (asset) {
-        await db.updateDataAsset(asset.id, { sensitivity: assetSensitivity } as any);
+        await db.updateDataAsset(asset.id, { sensitivity: assetSensitivity } as any, organizationId);
       }
 
       return { tagged, message: `${tagged} colunas tagueadas automaticamente.` };
@@ -1436,10 +1459,10 @@ ${tableData}`;
   // ─── Preview: o que seria escrito de volta ao Databricks ─────────────────
   previewDatabricksSync: stewardProcedure
     .input(z.object({ assetId: z.number() }))
-    .mutation(async ({ input }) => {
-      const attrs = await db.getDataAttributes(input.assetId);
-      const allAssets = await db.getDataAssets();
-      const asset = allAssets.find(a => a.id === input.assetId);
+    .mutation(async ({ input, ctx }) => {
+      const organizationId = ctx.user.organizationId ?? 1;
+      const asset = await assertAssetInOrganization(input.assetId, organizationId);
+      const attrs = await db.getDataAttributes(input.assetId, organizationId);
 
       if (!asset?.fullyQualifiedName) {
         return { canSync: false, reason: 'Ativo não possui fullyQualifiedName (ex: catalog.schema.table).', commands: [] };
@@ -1501,9 +1524,9 @@ ${tableData}`;
   pushVerifiedTagsToDatabricks: stewardProcedure
     .input(z.object({ assetId: z.number() }))
     .mutation(async ({ input, ctx }) => {
-      const attrs = await db.getDataAttributes(input.assetId);
-      const allAssets = await db.getDataAssets();
-      const asset = allAssets.find(a => a.id === input.assetId);
+      const organizationId = ctx.user.organizationId ?? 1;
+      const asset = await assertAssetInOrganization(input.assetId, organizationId);
+      const attrs = await db.getDataAttributes(input.assetId, organizationId);
 
       if (!asset?.fullyQualifiedName || asset.sourceSystem !== 'Databricks') {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Ativo sem FQN Databricks ou origem inválida.' });
@@ -1577,9 +1600,9 @@ ${tableData}`;
   pushToGlossaryWithLLM: stewardProcedure
     .input(z.object({ assetId: z.number() }))
     .mutation(async ({ input, ctx }) => {
-      const attrs = await db.getDataAttributes(input.assetId);
-      const allAssets = await db.getDataAssets();
-      const asset = allAssets.find(a => a.id === input.assetId);
+      const organizationId = ctx.user.organizationId ?? 1;
+      const asset = await assertAssetInOrganization(input.assetId, organizationId);
+      const attrs = await db.getDataAttributes(input.assetId, organizationId);
       if (!attrs.length) return { created: 0, skipped: 0, message: 'Nenhum atributo.' };
 
       const colsText = attrs.map(a => {
@@ -1617,7 +1640,7 @@ ${colsText}`;
       const parsed = JSON.parse(raw) as { terms?: Array<{ term: string; abbreviation?: string; definition: string; category?: string; examples?: string }> };
       const terms = parsed.terms ?? [];
 
-      const existing = await db.getGlossaryTerms({});
+      const existing = await db.getGlossaryTerms({ organizationId });
       const existingNames = new Set(existing.map((t: any) => t.term.toLowerCase().trim()));
 
       let created = 0, skipped = 0;
@@ -1625,6 +1648,7 @@ ${colsText}`;
         if (!t.term || !t.definition) { skipped++; continue; }
         if (existingNames.has(t.term.toLowerCase().trim())) { skipped++; continue; }
         await db.createGlossaryTerm({
+          organizationId,
           term: t.term,
           definition: t.definition,
           abbreviation: t.abbreviation || undefined,
@@ -1643,24 +1667,25 @@ ${colsText}`;
   // ─── Tag Policies — CRUD de políticas de tags governadas ─────────────────
   getTagPolicies: publicProcedure.query(() => db.getTagPolicies()),
 
-  getTagPolicyStats: publicProcedure.query(() => db.getTagPolicyStats()),
+  getTagPolicyStats: protectedProcedure.query(({ ctx }) => db.getTagPolicyStats(ctx.user.organizationId ?? 1)),
 
-  getTagAssignmentCounts: publicProcedure
+  getTagAssignmentCounts: protectedProcedure
     .input(z.object({ tagKeys: z.array(z.string()) }))
-    .query(({ input }) => db.getTagAssignmentCounts(input.tagKeys)),
+    .query(({ input, ctx }) => db.getTagAssignmentCounts(input.tagKeys, ctx.user.organizationId ?? 1)),
 
   // Retorna conformidade por ativo: verifica se as políticas obrigatórias estão presentes em aiSuggestion
-  getTagComplianceByAsset: publicProcedure
+  getTagComplianceByAsset: protectedProcedure
     .input(z.object({ requiredTagKeys: z.array(z.string()) }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const { requiredTagKeys } = input;
       if (requiredTagKeys.length === 0) return [];
 
-      const allAssets = await db.getDataAssets();
+      const organizationId = ctx.user.organizationId ?? 1;
+      const allAssets = await db.getDataAssets({ organizationId });
 
       const results = await Promise.all(
         allAssets.slice(0, 30).map(async (asset: any) => {
-          const attrs = await db.getDataAttributes(asset.id);
+          const attrs = await db.getDataAttributes(asset.id, organizationId);
           // Agrega todas as tags mencionadas nos aiSuggestion dos atributos deste ativo
           const tagValueMap: Record<string, string[]> = {};
           for (const attr of attrs) {
@@ -1741,12 +1766,10 @@ ${colsText}`;
   // ─── Sugerir tags governadas com IA (Gemini) ─────────────────────────────
   suggestTagsWithLLM: protectedProcedure
     .input(z.object({ assetId: z.number() }))
-    .mutation(async ({ input }) => {
-      const allAssets = await db.getDataAssets();
-      const asset = allAssets.find(a => a.id === input.assetId);
-      if (!asset) throw new TRPCError({ code: 'NOT_FOUND', message: 'Ativo não encontrado.' });
-
-      const attrs = await db.getDataAttributes(input.assetId);
+    .mutation(async ({ input, ctx }) => {
+      const organizationId = ctx.user.organizationId ?? 1;
+      const asset = await assertAssetInOrganization(input.assetId, organizationId);
+      const attrs = await db.getDataAttributes(input.assetId, organizationId);
       const policies = await db.getTagPolicies();
 
       // Montar resumo das políticas e seus valores permitidos para o prompt
@@ -1819,10 +1842,11 @@ Inclua apenas as tags que fazem sentido para o ativo. Use somente valores que es
     db.getDb().then(d => d ? d.select().from(qualityDimensions).orderBy(qualityDimensions.id) : [])
   ),
   
-  getQualityRules: publicProcedure.input(z.object({ assetId: z.number() })).query(({ input }) =>
-    db.getQualityRules(input.assetId)
-  ),
-  updateQualityRule: protectedProcedure.input(z.object({
+  getQualityRules: protectedProcedure.input(z.object({ assetId: z.number() })).query(async ({ input, ctx }) => {
+    await assertAssetInOrganization(input.assetId, ctx.user.organizationId ?? 1);
+    return db.getQualityRules(input.assetId);
+  }),
+  updateQualityRule: stewardProcedure.input(z.object({
     dimensionId: z.number(),
     assetId: z.number().optional(),
     domainId: z.number().optional(),
@@ -1830,9 +1854,16 @@ Inclua apenas as tags que fazem sentido para o ativo. Use somente valores que es
     threshold: z.number(),
     expressionJson: z.any().optional(),
     isActive: z.boolean().default(true),
-  })).mutation(({ input }) => db.upsertQualityRule(input)),
+  })).mutation(async ({ input, ctx }) => {
+    if (input.assetId != null) await assertAssetInOrganization(input.assetId, ctx.user.organizationId ?? 1);
+    if ((input.isGlobal || input.domainId != null) && ctx.user.role !== "admin") {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Somente Admin pode alterar regras globais ou por domínio compartilhado." });
+    }
+    return db.upsertQualityRule(input);
+  }),
 
-  runChecks: protectedProcedure.input(z.object({ assetId: z.number() })).mutation(async ({ input }) => {
+  runChecks: protectedProcedure.input(z.object({ assetId: z.number() })).mutation(async ({ input, ctx }) => {
+    await assertAssetInOrganization(input.assetId, ctx.user.organizationId ?? 1);
     const { qualityEngine } = await import("./qualityEngine");
     try {
       await qualityEngine.runChecksForAsset(input.assetId);
@@ -1871,9 +1902,10 @@ Inclua apenas as tags que fazem sentido para o ativo. Use somente valores que es
     reason: z.string(),
     resolution: z.string().optional(),
   })).mutation(async ({ input, ctx }) => {
-    const lineage = await db.getAllDataLineage();
-    const assets = await db.getDataAssets({});
-    const users = await db.getAllUsers();
+    const organizationId = ctx.user.organizationId ?? 1;
+    const sourceAsset = await assertAssetInOrganization(input.assetId, organizationId);
+    const lineage = await db.getAllDataLineage(organizationId);
+    const assets = await db.getDataAssets({ organizationId });
     
     // Encontrar todos os dependentes (downstream)
     const dependentIds = new Set<number>();
@@ -1890,20 +1922,13 @@ Inclua apenas as tags que fazem sentido para o ativo. Use somente valores que es
 
     if (dependentIds.size === 0) return { notifiedCount: 0 };
 
-    const sourceAsset = assets.find(a => a.id === input.assetId);
     const targetAssets = assets.filter(a => dependentIds.has(a.id));
     
     // Coletar e-mails dos owners e stewards dos dependentes
     const recipientEmails = new Set<string>();
     targetAssets.forEach(a => {
-      if (a.ownerId) {
-        const owner = users.find(u => u.id === a.ownerId);
-        if (owner?.email) recipientEmails.add(owner.email);
-      }
-      if (a.stewardId) {
-        const steward = users.find(u => u.id === a.stewardId);
-        if (steward?.email) recipientEmails.add(steward.email);
-      }
+      if (a.ownerEmail) recipientEmails.add(a.ownerEmail);
+      if (a.stewardEmail) recipientEmails.add(a.stewardEmail);
     });
 
     const { queueAndSendEmail, buildLineageImpactEmail } = await import("./emailService");
@@ -1943,11 +1968,15 @@ Inclua apenas as tags que fazem sentido para o ativo. Use somente valores que es
     }))
     .mutation(async ({ input, ctx }) => {
       const { runGovernanceAgents } = await import('./agentOrchestrator');
+      const organizationId = ctx.user.organizationId ?? 1;
+      await assertAssetInOrganization(input.assetId, organizationId);
       const result = await runGovernanceAgents({
+        organizationId,
         assetId: input.assetId,
         agents: input.agents,
       });
       await db.createAuditLog({
+        organizationId,
         userId: ctx.user?.id, userEmail: ctx.user?.email, userName: ctx.user?.name,
         action: 'update' as any, entity: 'data_asset', entityId: input.assetId,
         details: { action: 'governance_agents_run', runId: result.runId, summary: result.summary },
@@ -1962,9 +1991,9 @@ Inclua apenas as tags que fazem sentido para o ativo. Use somente valores que es
       maxAssets: z.number().min(1).max(50).default(10),
       agents: z.array(z.enum(['inspection', 'classification', 'documentation', 'audit'])).optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { runGlobalGovernanceAgents } = await import('./agentOrchestrator');
-      return runGlobalGovernanceAgents({ maxAssets: input.maxAssets, agents: input.agents });
+      return runGlobalGovernanceAgents({ organizationId: ctx.user.organizationId ?? 1, maxAssets: input.maxAssets, agents: input.agents });
     }),
 
   // ─── Políticas Automáticas Databricks (Masking/RLS/CLS) ────────────────────────────────────────────
@@ -1982,11 +2011,13 @@ Inclua apenas as tags que fazem sentido para o ativo. Use somente valores que es
       rlsUserColumn: z.string().optional(),
       bypassGroups: z.array(z.string()).optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      const organizationId = ctx.user.organizationId ?? 1;
+      await assertAssetInOrganization(input.assetId, organizationId);
       const { previewPiiPolicies } = await import('./databricksPolicyService');
       const { scanTable } = await import('./piiScanner');
 
-      const attrs = await db.getDataAttributes(input.assetId);
+      const attrs = await db.getDataAttributes(input.assetId, organizationId);
       const columns = attrs.map((a: any) => ({ name: a.name, type: a.dataType ?? 'string' }));
       const scanResult = scanTable(columns);
       const piiColumns = scanResult.piiColumns.map((c) => ({ name: c.name, piiResult: c.result }));
@@ -2002,13 +2033,13 @@ Inclua apenas as tags que fazem sentido para o ativo. Use somente valores que es
 
   /** RETORNA A LISTA DE GRUPOS DO DATABRICKS VIA SCIM API (Cenário 3) */
   getDatabricksGroups: stewardProcedure
-    .query(async () => {
+    .query(async ({ ctx }) => {
       const fallbackGroups = [
         "data_steward", "data_owner", "admins", "data_science", 
         "data_engineering", "marketing", "finance", "hr_confidential"
       ];
 
-      const configs = await db.getConnectorConfigs();
+      const configs = await db.getConnectorConfigs(ctx.user.organizationId ?? 1);
       const databricksCfg = configs.find(c => c.connectorType?.toLowerCase() === 'databricks' && c.active);
       const settings = databricksCfg?.configJson 
         ? (typeof databricksCfg.configJson === 'string' ? JSON.parse(databricksCfg.configJson) : databricksCfg.configJson) 
@@ -2129,6 +2160,11 @@ Inclua apenas as tags que fazem sentido para o ativo. Use somente valores que es
       rlsUserColumn: z.string().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      const organizationId = ctx.user.organizationId ?? 1;
+      await assertAssetInOrganization(input.assetId, organizationId);
+      if (ctx.user.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "A integração Databricks usa credenciais globais; até haver configuração por tenant, somente Admin pode sincronizar políticas." });
+      }
       const { getDatabricksPolicyConfig, syncApprovedPiiPolicies } = await import('./databricksPolicyService');
       const { scanTable } = await import('./piiScanner');
 
@@ -2137,7 +2173,7 @@ Inclua apenas as tags que fazem sentido para o ativo. Use somente valores que es
         throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'Credenciais Databricks não configuradas (DATABRICKS_HOST / DATABRICKS_TOKEN).' });
       }
 
-      const attrs = await db.getDataAttributes(input.assetId);
+      const attrs = await db.getDataAttributes(input.assetId, organizationId);
       const columns = attrs.map((a: any) => ({ name: a.name, type: a.dataType ?? 'string' }));
       const scanResult = scanTable(columns);
       const piiColumns = scanResult.piiColumns.map((c) => ({ name: c.name, piiResult: c.result }));
@@ -2155,10 +2191,10 @@ Inclua apenas as tags que fazem sentido para o ativo. Use somente valores que es
         throw new TRPCError({ code: 'PRECONDITION_FAILED', message: err?.message ?? String(err) });
       }
 
-      const allAssets = await db.getDataAssets();
-      const asset = allAssets.find((a: any) => a.id === input.assetId);
+      const asset = await db.getDataAssetById(input.assetId, organizationId);
 
       await db.createAuditLog({
+        organizationId,
         userId: ctx.user?.id, userEmail: ctx.user?.email, userName: ctx.user?.name,
         action: 'update' as any, entity: 'data_asset', entityId: input.assetId,
         details: { action: 'pii_policies_synced_to_databricks', ...summary },
@@ -2221,15 +2257,16 @@ Inclua apenas as tags que fazem sentido para o ativo. Use somente valores que es
   /** Dispara alerta manual de PII detectado para um ativo */
   sendPiiDetectedAlert: stewardProcedure
     .input(z.object({ assetId: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      const organizationId = ctx.user.organizationId ?? 1;
+      const asset = await assertAssetInOrganization(input.assetId, organizationId);
+      if (ctx.user.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "O canal Teams está configurado globalmente; somente Admin pode enviar alertas enquanto não houver destino por tenant." });
+      }
       const { sendGovernanceAlert } = await import('./teamsGovernanceAlerts');
       const { scanTable } = await import('./piiScanner');
 
-      const allAssets = await db.getDataAssets();
-      const asset = allAssets.find((a: any) => a.id === input.assetId);
-      if (!asset) throw new TRPCError({ code: 'NOT_FOUND', message: 'Ativo não encontrado.' });
-
-      const attrs = await db.getDataAttributes(input.assetId);
+      const attrs = await db.getDataAttributes(input.assetId, organizationId);
       const columns = attrs.map((a: any) => ({ name: a.name, type: a.dataType ?? 'string' }));
       const scanResult = scanTable(columns);
 
@@ -2426,12 +2463,27 @@ const accessRequestsRouter = router({
     stewardId: z.number().optional(),
     flowType: z.enum(["acesso_dados", "dados_restritos", "terceiros", "projeto_ia"]).optional(),
     priority: z.enum(["baixa", "media", "alta"]).optional(),
-  })).mutation(({ input, ctx }) => {
-    const req = db.createAccessRequest({
-      ...input,
-      requesterId: ctx.user?.id ?? null,
-      requesterName: input.requesterName ?? ctx.user?.name ?? undefined,
-      requesterEmail: input.requesterEmail ?? ctx.user?.email ?? undefined,
+  })).mutation(async ({ input, ctx }) => {
+    const organizationId = ctx.user.organizationId ?? 1;
+    const asset = await assertAssetInOrganization(input.assetId, organizationId);
+    const req = await db.createAccessRequest({
+      ticketNumber: input.ticketNumber,
+      organizationId,
+      assetId: input.assetId,
+      requesterId: ctx.user.id,
+      requesterName: ctx.user.name ?? undefined,
+      requesterEmail: ctx.user.email ?? undefined,
+      nivelAcesso: input.nivelAcesso,
+      papelGrupo: input.papelGrupo,
+      baseLegal: input.baseLegal,
+      finalidade: input.finalidade,
+      prazoNecessidade: input.prazoNecessidade,
+      checklistJson: input.checklistJson,
+      envolveTerceiros: input.envolveTerceiros,
+      ownerId: asset.ownerId ?? undefined,
+      stewardId: asset.stewardId ?? undefined,
+      flowType: input.flowType,
+      priority: input.priority,
       status: "pendente_owner",
       statusOwner: "pendente",
       statusSteward: "aguardando",
@@ -2449,17 +2501,43 @@ const accessRequestsRouter = router({
     requesterId: z.number().optional(),
     ownerId: z.number().optional(),
     stewardId: z.number().optional(),
-  })).query(({ input }) => db.getAccessRequests(input)),
+  })).query(({ input, ctx }) => {
+    const organizationId = ctx.user.organizationId ?? 1;
+    const privileged = ["admin", "data_owner", "data_steward"].includes(ctx.user.role);
+    return db.getAccessRequests({
+      organizationId,
+      ...input,
+      requesterId: privileged ? input.requesterId : ctx.user.id,
+    });
+  }),
 
   getById: protectedProcedure.input(z.object({ id: z.number() }))
-    .query(({ input }) => db.getAccessRequestById(input.id)),
+    .query(async ({ input, ctx }) => {
+      const request = await db.getAccessRequestById(input.id, ctx.user.organizationId ?? 1);
+      if (!request || (!["admin", "data_owner", "data_steward"].includes(ctx.user.role) && request.requesterId !== ctx.user.id)) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Solicitação não encontrada nesta organização." });
+      }
+      return request;
+    }),
 
   approveOwner: protectedProcedure.input(z.object({
     id: z.number(),
     comment: z.string().default(""),
   })).mutation(async ({ input, ctx }) => {
-    const result = await db.approveByOwner(input.id, input.comment);
+    const organizationId = ctx.user.organizationId ?? 1;
+    if (ctx.user.role !== "admin" && ctx.user.role !== "data_owner") {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Aprovação de Owner exige papel Admin ou Data Owner." });
+    }
+    const request = await db.getAccessRequestById(input.id, organizationId);
+    if (!request) throw new TRPCError({ code: "NOT_FOUND", message: "Solicitação não encontrada nesta organização." });
+    if (ctx.user.role !== "admin") {
+      const assigned = await db.getAccessRequests({ organizationId, ownerId: ctx.user.id });
+      if (!assigned.some(row => row.id === input.id)) throw new TRPCError({ code: "FORBIDDEN", message: "Você não é o Owner designado para esta solicitação." });
+    }
+    const result = await db.approveByOwner(input.id, input.comment, organizationId, ctx.user.id);
+    if (!result.length) throw new TRPCError({ code: "CONFLICT", message: "A solicitação não está pendente de aprovação Owner." });
     await db.createAuditLog({
+      organizationId,
       userId: ctx.user?.id, userEmail: ctx.user?.email, userName: ctx.user?.name,
       action: "approve", entity: "access_request", entityId: input.id,
       details: { comment: input.comment, step: "owner" },
@@ -2477,8 +2555,20 @@ const accessRequestsRouter = router({
     id: z.number(),
     comment: z.string(),
   })).mutation(async ({ input, ctx }) => {
-    const result = await db.rejectByOwner(input.id, input.comment);
+    const organizationId = ctx.user.organizationId ?? 1;
+    if (ctx.user.role !== "admin" && ctx.user.role !== "data_owner") {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Rejeição de Owner exige papel Admin ou Data Owner." });
+    }
+    const request = await db.getAccessRequestById(input.id, organizationId);
+    if (!request) throw new TRPCError({ code: "NOT_FOUND", message: "Solicitação não encontrada nesta organização." });
+    if (ctx.user.role !== "admin") {
+      const assigned = await db.getAccessRequests({ organizationId, ownerId: ctx.user.id });
+      if (!assigned.some(row => row.id === input.id)) throw new TRPCError({ code: "FORBIDDEN", message: "Você não é o Owner designado para esta solicitação." });
+    }
+    const result = await db.rejectByOwner(input.id, input.comment, organizationId, ctx.user.id);
+    if (!result.length) throw new TRPCError({ code: "CONFLICT", message: "A solicitação não está pendente de aprovação Owner." });
     await db.createAuditLog({
+      organizationId,
       userId: ctx.user?.id, userEmail: ctx.user?.email, userName: ctx.user?.name,
       action: "reject", entity: "access_request", entityId: input.id,
       details: { comment: input.comment, step: "owner" },
@@ -2491,21 +2581,30 @@ const accessRequestsRouter = router({
     id: z.number(),
     comment: z.string().default(""),
   })).mutation(async ({ input, ctx }) => {
-    const result = await db.approveBySteward(input.id, input.comment);
+    const organizationId = ctx.user.organizationId ?? 1;
+    if (ctx.user.role !== "admin" && ctx.user.role !== "data_steward") {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Aprovação Steward exige papel Admin ou Data Steward." });
+    }
+    const req = await db.getAccessRequestById(input.id, organizationId);
+    if (!req) throw new TRPCError({ code: "NOT_FOUND", message: "Solicitação não encontrada nesta organização." });
+    if (ctx.user.role !== "admin") {
+      const assigned = await db.getAccessRequests({ organizationId, stewardId: ctx.user.id });
+      if (!assigned.some(row => row.id === input.id)) throw new TRPCError({ code: "FORBIDDEN", message: "Você não é o Steward designado para esta solicitação." });
+    }
+    const result = await db.approveBySteward(input.id, input.comment, organizationId, ctx.user.id);
+    if (!result.length) throw new TRPCError({ code: "CONFLICT", message: "A solicitação não está pendente de aprovação Steward." });
 
     // ── Grant automático pós-aprovação ──────────────────────────────────────
     try {
       // 1. Buscar dados completos da solicitação
-      const requests = await db.getAccessRequests({ assetId: undefined as any });
-      const req = (await db.getAccessRequests({})).find((r: any) => r.id === input.id);
       if (req) {
-        // 2. Buscar ativo para obter fullyQualifiedName + sourceSystem
-        const asset = await db.getDataAssetById(req.assetId);
+        // 2. Buscar ativo somente no tenant desta sessão
+        const asset = await db.getDataAssetById(req.assetId, organizationId);
         if (asset && asset.fullyQualifiedName && asset.sourceSystem) {
           const sourceSystemLower = asset.sourceSystem.toLowerCase();
           if (sourceSystemLower.includes("databricks")) {
             // 3. Buscar conector Databricks ativo
-            const connectors = await db.getConnectorConfigs();
+            const connectors = await db.getConnectorConfigs(organizationId);
             const connector = connectors.find((c: any) =>
               c.active && (c.connectorType?.toLowerCase().includes("databricks") ||
                            c.name?.toLowerCase().includes("databricks"))
@@ -2558,11 +2657,15 @@ TO \`${req.requesterEmail}\`;</pre>
       }
     } catch (grantErr) {
       // Erros no grant não devem bloquear a aprovação — apenas logar
-      console.error("[approveSteward] Falha no grant automático:", grantErr);
+      console.error("[approveSteward] Falha no grant automático:", {
+        errorClass: grantErr instanceof Error ? grantErr.name : "UnknownError",
+        requestId: input.id,
+      });
     }
     // ── fim do grant automático ──────────────────────────────────────────────
 
     await db.createAuditLog({
+      organizationId,
       userId: ctx.user?.id, userEmail: ctx.user?.email, userName: ctx.user?.name,
       action: "approve", entity: "access_request", entityId: input.id,
       details: { comment: input.comment, step: "steward" },
@@ -2575,8 +2678,20 @@ TO \`${req.requesterEmail}\`;</pre>
     id: z.number(),
     comment: z.string(),
   })).mutation(async ({ input, ctx }) => {
-    const result = await db.rejectBySteward(input.id, input.comment);
+    const organizationId = ctx.user.organizationId ?? 1;
+    if (ctx.user.role !== "admin" && ctx.user.role !== "data_steward") {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Rejeição Steward exige papel Admin ou Data Steward." });
+    }
+    const request = await db.getAccessRequestById(input.id, organizationId);
+    if (!request) throw new TRPCError({ code: "NOT_FOUND", message: "Solicitação não encontrada nesta organização." });
+    if (ctx.user.role !== "admin") {
+      const assigned = await db.getAccessRequests({ organizationId, stewardId: ctx.user.id });
+      if (!assigned.some(row => row.id === input.id)) throw new TRPCError({ code: "FORBIDDEN", message: "Você não é o Steward designado para esta solicitação." });
+    }
+    const result = await db.rejectBySteward(input.id, input.comment, organizationId, ctx.user.id);
+    if (!result.length) throw new TRPCError({ code: "CONFLICT", message: "A solicitação não está pendente de aprovação Steward." });
     await db.createAuditLog({
+      organizationId,
       userId: ctx.user?.id, userEmail: ctx.user?.email, userName: ctx.user?.name,
       action: "reject", entity: "access_request", entityId: input.id,
       details: { comment: input.comment, step: "steward" },
@@ -2597,30 +2712,31 @@ const auditLogRouter = router({
       offset: z.number().min(0).default(0),
     }))
     .query(({ input, ctx }) => {
-      // Apenas admins podem ver todos os logs; outros veem apenas os próprios
-      if (ctx.user?.role !== 'admin') {
-        return db.getAuditLogs({ ...input, userId: ctx.user?.id });
+      const organizationId = ctx.user.organizationId ?? 1;
+      // Admins e Stewards veem a trilha da própria organização; demais usuários, apenas a própria.
+      if (ctx.user.role !== 'admin' && ctx.user.role !== 'data_steward') {
+        return db.getAuditLogs({ ...input, organizationId, userId: ctx.user.id });
       }
-      return db.getAuditLogs(input);
+      return db.getAuditLogs({ ...input, organizationId });
     }),
 });
 
 // ─── Business Glossary Router ────────────────────────────────────────────────
 const glossaryRouter = router({
-  list: publicProcedure
+  list: protectedProcedure
     .input(z.object({
       status: z.string().optional(),
       category: z.string().optional(),
       search: z.string().optional(),
       domainId: z.number().optional(),
     }))
-    .query(({ input }) => db.getGlossaryTerms(input)),
+    .query(({ input, ctx }) => db.getGlossaryTerms({ ...input, organizationId: ctx.user.organizationId ?? 1 })),
 
-  categories: publicProcedure.query(() => db.getGlossaryCategories()),
+  categories: protectedProcedure.query(({ ctx }) => db.getGlossaryCategories(ctx.user.organizationId ?? 1)),
 
-  byId: publicProcedure
+  byId: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .query(({ input }) => db.getGlossaryTermById(input.id)),
+    .query(({ input, ctx }) => db.getGlossaryTermById(input.id, ctx.user.organizationId ?? 1)),
 
   create: protectedProcedure
     .input(z.object({
@@ -2629,7 +2745,6 @@ const glossaryRouter = router({
       abbreviation: z.string().max(64).optional(),
       domainId: z.number().optional(),
       ownerId: z.number().optional(),
-      status: z.enum(["rascunho", "em_revisao", "aprovado", "obsoleto"]).default("rascunho"),
       category: z.string().max(128).optional(),
       synonyms: z.string().optional(),
       examples: z.string().optional(),
@@ -2638,11 +2753,13 @@ const glossaryRouter = router({
     }))
     .mutation(({ input, ctx }) => db.createGlossaryTerm({
       ...input,
+      organizationId: ctx.user.organizationId ?? 1,
       createdById: ctx.user?.id ?? null,
       createdByName: ctx.user?.name ?? null,
+      status: "rascunho",
     } as any)),
 
-  update: protectedProcedure
+  update: stewardProcedure
     .input(z.object({
       id: z.number(),
       term: z.string().min(1).max(256).optional(),
@@ -2650,31 +2767,40 @@ const glossaryRouter = router({
       abbreviation: z.string().max(64).optional(),
       domainId: z.number().optional(),
       ownerId: z.number().optional(),
-      status: z.enum(["rascunho", "em_revisao", "aprovado", "obsoleto"]).optional(),
       category: z.string().max(128).optional(),
       synonyms: z.string().optional(),
       examples: z.string().optional(),
       notes: z.string().optional(),
       relatedTermIds: z.string().optional(),
-      approvedBy: z.string().optional(),
-      approvedAt: z.date().optional(),
     }))
-    .mutation(({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      const organizationId = ctx.user.organizationId ?? 1;
+      if (!await db.getGlossaryTermById(input.id, organizationId)) throw new TRPCError({ code: "NOT_FOUND" });
       const { id, ...data } = input;
-      return db.updateGlossaryTerm(id, data);
+      return db.updateGlossaryTerm(id, data, organizationId);
     }),
 
-  approve: protectedProcedure
+  approve: stewardProcedure
     .input(z.object({ id: z.number() }))
-    .mutation(({ input, ctx }) => db.updateGlossaryTerm(input.id, {
-      status: "aprovado",
-      approvedBy: ctx.user?.name ?? ctx.user?.email ?? "Sistema",
-      approvedAt: new Date(),
-    })),
+    .mutation(async ({ input, ctx }) => {
+      const organizationId = ctx.user.organizationId ?? 1;
+      if (!await db.getGlossaryTermById(input.id, organizationId)) throw new TRPCError({ code: "NOT_FOUND" });
+      const result = await db.updateGlossaryTerm(input.id, {
+        status: "aprovado",
+        approvedBy: ctx.user.name ?? ctx.user.email ?? "Data Steward",
+        approvedAt: new Date(),
+      }, organizationId);
+      await db.createAuditLog({ organizationId, userId: ctx.user.id, action: "update", entity: "business_glossary", entityId: input.id, details: { decision: "approved" }, ipAddress: ctx.req?.ip });
+      return result;
+    }),
 
-  delete: protectedProcedure
+  delete: stewardProcedure
     .input(z.object({ id: z.number() }))
-    .mutation(({ input }) => db.deleteGlossaryTerm(input.id)),
+    .mutation(async ({ input, ctx }) => {
+      const organizationId = ctx.user.organizationId ?? 1;
+      if (!await db.getGlossaryTermById(input.id, organizationId)) throw new TRPCError({ code: "NOT_FOUND" });
+      return db.deleteGlossaryTerm(input.id, organizationId);
+    }),
 });
 
 // ─── Organizations Router ────────────────────────────────────────────────────
@@ -2774,16 +2900,20 @@ const organizationsRouter = router({
 
 // ─── SLA Router ──────────────────────────────────────────────────────────────
 const slaRouter = router({
-  listConfigs: protectedProcedure.query(() => db.getSlaConfigs()),
+  listConfigs: protectedProcedure.query(({ ctx }) => db.getSlaConfigs(ctx.user.organizationId ?? 1)),
   configById: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .query(({ input }) => db.getSlaConfigById(input.id)),
-  createConfig: protectedProcedure
+    .query(async ({ input, ctx }) => {
+      const config = await db.getSlaConfigById(input.id, ctx.user.organizationId ?? 1);
+      if (!config) throw new TRPCError({ code: "NOT_FOUND", message: "Configuração SLA não encontrada nesta organização." });
+      return config;
+    }),
+  createConfig: stewardProcedure
     .input(z.object({
       name: z.string().min(1),
       description: z.string().optional(),
       entityType: z.enum(['asset', 'domain', 'global']).default('global'),
-      entityId: z.number().optional(),
+      entityId: z.number().int().positive().optional(),
       maxUpdateDays: z.number().min(1).max(365).optional(),
       minQualityScore: z.number().min(0).max(100).optional(),
       maxAccessResponseDays: z.number().min(1).max(90).optional(),
@@ -2794,25 +2924,24 @@ const slaRouter = router({
       active: z.boolean().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
-      const result = await db.createSlaConfig({ ...input, createdById: ctx.user?.id ?? null } as any);
-      
-      // Audit Log for SLA Config Creation
-      if (ctx.user) {
-        await db.createAuditLog({
-          userId: ctx.user.id,
-          userEmail: ctx.user.email,
-          userName: ctx.user.name,
-          action: "create",
-          entity: "sla_config",
-          entityId: (result as any).id,
-          entityName: input.name,
-          details: { entityType: input.entityType, entityId: input.entityId },
-          ipAddress: ctx.req?.ip,
-        });
+      const organizationId = ctx.user.organizationId ?? 1;
+      if ((input.entityType === "global") !== (input.entityId == null)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Global não recebe entityId; escopos Asset/Domain exigem entityId." });
       }
-      return result;
+      if (input.entityType === "asset") await assertAssetInOrganization(input.entityId!, organizationId);
+      const duplicates = await db.getSlaConfigs(organizationId, { entityType: input.entityType, entityId: input.entityId, active: true });
+      if (input.active !== false && duplicates.length) {
+        throw new TRPCError({ code: "CONFLICT", message: "Já existe configuração SLA ativa para este escopo. Desative ou edite a existente." });
+      }
+      const [config] = await db.createSlaConfig({ ...input, organizationId, createdById: ctx.user.id } as any);
+      await db.createAuditLog({
+        organizationId, userId: ctx.user.id, userEmail: ctx.user.email, userName: ctx.user.name,
+        action: "create", entity: "sla_config", entityId: config?.id, entityName: input.name,
+        details: { entityType: input.entityType, entityId: input.entityId }, ipAddress: ctx.req?.ip,
+      });
+      return config;
     }),
-  updateConfig: protectedProcedure
+  updateConfig: stewardProcedure
     .input(z.object({
       id: z.number(),
       name: z.string().optional(),
@@ -2826,23 +2955,61 @@ const slaRouter = router({
       alertOnBreachOnly: z.boolean().optional(),
       active: z.boolean().optional(),
     }))
-    .mutation(({ input }) => { const { id, ...data } = input; return db.updateSlaConfig(id, data as any); }),
-  deleteConfig: protectedProcedure
+    .mutation(async ({ input, ctx }) => {
+      const organizationId = ctx.user.organizationId ?? 1;
+      if (!await db.getSlaConfigById(input.id, organizationId)) throw new TRPCError({ code: "NOT_FOUND", message: "Configuração SLA não encontrada nesta organização." });
+      const { id, ...data } = input;
+      const result = await db.updateSlaConfig(id, data as any, organizationId);
+      if (!result.length) throw new TRPCError({ code: "CONFLICT", message: "A configuração foi alterada por outra operação." });
+      await db.createAuditLog({ organizationId, userId: ctx.user.id, action: "update", entity: "sla_config", entityId: id, details: { fields: Object.keys(data) }, ipAddress: ctx.req?.ip });
+      return result;
+    }),
+  deleteConfig: stewardProcedure
     .input(z.object({ id: z.number() }))
-    .mutation(({ input }) => db.deleteSlaConfig(input.id)),
+    .mutation(async ({ input, ctx }) => {
+      const organizationId = ctx.user.organizationId ?? 1;
+      if (!await db.getSlaConfigById(input.id, organizationId)) throw new TRPCError({ code: "NOT_FOUND", message: "Configuração SLA não encontrada nesta organização." });
+      const result = await db.deleteSlaConfig(input.id, organizationId);
+      await db.createAuditLog({ organizationId, userId: ctx.user.id, action: "delete", entity: "sla_config", entityId: input.id, details: {}, ipAddress: ctx.req?.ip });
+      return result;
+    }),
   listViolations: protectedProcedure
     .input(z.object({ resolved: z.boolean().optional(), entityType: z.string().optional(), limit: z.number().optional(), offset: z.number().optional() }).optional())
-    .query(({ input }) => db.getSlaViolations(input ?? {})),
-  resolveViolation: protectedProcedure
+    .query(({ input, ctx }) => db.getSlaViolations(ctx.user.organizationId ?? 1, input ?? {})),
+  runEvaluation: stewardProcedure
+    .input(z.object({ dryRun: z.boolean().optional().default(false) }).optional())
+    .mutation(({ input, ctx }) => evaluateSla({
+      organizationId: ctx.user.organizationId ?? 1,
+      source: "manual",
+      actorId: ctx.user.id,
+      dryRun: input?.dryRun ?? false,
+    })),
+  resolveViolation: stewardProcedure
     .input(z.object({ id: z.number() }))
-    .mutation(({ input }) => db.resolveSlaViolation(input.id)),
-  updateViolationStatus: protectedProcedure
+    .mutation(async ({ input, ctx }) => {
+      const organizationId = ctx.user.organizationId ?? 1;
+      const violation = await db.getSlaViolationById(input.id, organizationId);
+      if (!violation) throw new TRPCError({ code: "NOT_FOUND", message: "Violação SLA não encontrada nesta organização." });
+      if (violation.status === "resolved") throw new TRPCError({ code: "CONFLICT", message: "A violação já está resolvida." });
+      const result = await db.resolveSlaViolation(input.id, organizationId);
+      if (!result.length) throw new TRPCError({ code: "CONFLICT", message: "A violação mudou de estado; atualize a tela." });
+      await db.createAuditLog({ organizationId, userId: ctx.user.id, action: "update", entity: "sla_violation", entityId: input.id, details: { operation: "manual_resolve" }, ipAddress: ctx.req?.ip });
+      return result;
+    }),
+  updateViolationStatus: stewardProcedure
     .input(z.object({
       id: z.number(),
-      status: z.string(),
-      rootCause: z.string().optional()
+      status: z.enum(["active", "investigating", "resolved"]),
+      rootCause: z.string().trim().max(2000).optional(),
     }))
-    .mutation(({ input }) => { const { id, ...data } = input; return db.updateSlaViolation(id, data as any); }),
+    .mutation(async ({ input, ctx }) => {
+      const organizationId = ctx.user.organizationId ?? 1;
+      if (!await db.getSlaViolationById(input.id, organizationId)) throw new TRPCError({ code: "NOT_FOUND", message: "Violação SLA não encontrada nesta organização." });
+      const result = await db.updateSlaViolation(input.id, { status: input.status, rootCause: input.rootCause } as any, organizationId);
+      if (!result.length) throw new TRPCError({ code: "CONFLICT", message: "A violação mudou de estado; atualize a tela." });
+      await db.createAuditLog({ organizationId, userId: ctx.user.id, action: "update", entity: "sla_violation", entityId: input.id, details: { status: input.status, rootCauseUpdated: input.rootCause !== undefined }, ipAddress: ctx.req?.ip });
+      return result;
+    }),
 });
 
 // ─── Webhooks Router ──────────────────────────────────────────────────────────
@@ -2907,8 +3074,9 @@ const ssoRouter = router({
 // ─── API Keys Router ──────────────────────────────────────────────────────────
 const apiKeysRouter = router({
   list: protectedProcedure.query(({ ctx }) => {
-    const isAdmin = ctx.user?.role === 'admin';
-    return db.getApiKeys(isAdmin ? undefined : ctx.user?.id);
+    const organizationId = ctx.user.organizationId ?? 1;
+    const isAdmin = ctx.user.role === 'admin';
+    return db.getApiKeys(organizationId, isAdmin ? undefined : ctx.user.id);
   }),
   create: protectedProcedure
     .input(z.object({
@@ -2918,13 +3086,13 @@ const apiKeysRouter = router({
     }))
     .mutation(({ input, ctx }) => {
       if (!ctx.user?.id) throw new TRPCError({ code: 'UNAUTHORIZED' });
-      return db.createApiKey(input.name, input.scopes, ctx.user.id, input.expiresInDays);
+      return db.createApiKey(input.name, input.scopes, ctx.user.id, ctx.user.organizationId ?? 1, input.expiresInDays);
     }),
   revoke: protectedProcedure
     .input(z.object({ id: z.number() }))
     .mutation(({ input, ctx }) => {
       if (!ctx.user?.id) throw new TRPCError({ code: 'UNAUTHORIZED' });
-      return db.revokeApiKey(input.id, ctx.user.id, ctx.user.role === 'admin');
+      return db.revokeApiKey(input.id, ctx.user.id, ctx.user.organizationId ?? 1, ctx.user.role === 'admin');
     }),
 });
 
@@ -3036,12 +3204,12 @@ function generateDMBoKRecommendations(score: Awaited<ReturnType<typeof db.getMat
 }
 
 const maturityRouter = router({
-  score: protectedProcedure.query(() => db.getMaturityScore()),
-  drilldown: protectedProcedure.query(() => db.getMaturityDrilldown()),
-  lgpdAssets: protectedProcedure.query(() => db.getLgpdAssets()),
-  domainQuality: protectedProcedure.query(() => db.getDomainQualityTrend()),
-  recommendations: protectedProcedure.query(async () => {
-    const score = await db.getMaturityScore();
+  score: protectedProcedure.query(({ ctx }) => db.getMaturityScore(ctx.user.organizationId ?? 1)),
+  drilldown: protectedProcedure.query(({ ctx }) => db.getMaturityDrilldown(ctx.user.organizationId ?? 1)),
+  lgpdAssets: protectedProcedure.query(({ ctx }) => db.getLgpdAssets(ctx.user.organizationId ?? 1)),
+  domainQuality: protectedProcedure.query(({ ctx }) => db.getDomainQualityTrend(ctx.user.organizationId ?? 1)),
+  recommendations: protectedProcedure.query(async ({ ctx }) => {
+    const score = await db.getMaturityScore(ctx.user.organizationId ?? 1);
     return generateDMBoKRecommendations(score);
   }),
 });
@@ -3380,11 +3548,11 @@ function detectDatabricksLineage(tableNames: string[]): Array<{
 const connectorsRouter = router({
   catalog: protectedProcedure.query(() => CONNECTOR_CATALOG),
 
-  list: protectedProcedure.query(() => db.getConnectorConfigs()),
+  list: protectedProcedure.query(({ ctx }) => db.getConnectorConfigs(ctx.user.organizationId ?? 1)),
 
   get: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .query(({ input }) => db.getConnectorConfigById(input.id)),
+    .query(({ input, ctx }) => db.getConnectorConfigById(input.id, ctx.user.organizationId ?? 1)),
 
   create: protectedProcedure
     .input(z.object({
@@ -3396,6 +3564,7 @@ const connectorsRouter = router({
     .mutation(({ input, ctx }) => {
       if (ctx.user?.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
       return db.createConnectorConfig({
+        organizationId: ctx.user.organizationId ?? 1,
         connectorType: input.connectorType,
         name: input.name,
         configJson: input.configJson,
@@ -3411,24 +3580,29 @@ const connectorsRouter = router({
       configJson: z.object({}).catchall(z.unknown()).optional(),
       active: z.boolean().optional(),
     }))
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
       if (ctx.user?.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
+      const organizationId = ctx.user.organizationId ?? 1;
+      if (!await db.getConnectorConfigById(input.id, organizationId)) throw new TRPCError({ code: "NOT_FOUND" });
       const { id, ...rest } = input;
-      return db.updateConnectorConfig(id, rest);
+      return db.updateConnectorConfig(id, rest, organizationId);
     }),
 
   delete: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .mutation(({ input, ctx }) => {
+    .mutation(async ({ input, ctx }) => {
       if (ctx.user?.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
-      return db.deleteConnectorConfig(input.id);
+      const organizationId = ctx.user.organizationId ?? 1;
+      if (!await db.getConnectorConfigById(input.id, organizationId)) throw new TRPCError({ code: "NOT_FOUND" });
+      return db.deleteConnectorConfig(input.id, organizationId);
     }),
 
   test: protectedProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input, ctx }) => {
       if (ctx.user?.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
-      const config = await db.getConnectorConfigById(input.id);
+      const organizationId = ctx.user.organizationId ?? 1;
+      const config = await db.getConnectorConfigById(input.id, organizationId);
       if (!config) throw new TRPCError({ code: 'NOT_FOUND' });
       try {
         const rawCfg = typeof config.configJson === 'string' ? JSON.parse(config.configJson) : config.configJson as Record<string, any>;
@@ -3442,7 +3616,7 @@ const connectorsRouter = router({
               : rawCfg.authMode === "akv"
               ? "Verifique a URL do vault, nome do segredo e as permissões do Service Principal."
               : "Preencha o campo Token (PAT).";
-            await db.saveConnectorTestResult(input.id, false, `Token não resolvido. ${hint}`);
+            await db.saveConnectorTestResult(input.id, false, `Token não resolvido. ${hint}`, organizationId);
             return { success: false, message: `Token não resolvido — ${hint}` };
           }
           const adapter = new DatabricksAdapter({
@@ -3467,7 +3641,7 @@ const connectorsRouter = router({
           const msg = isOk
             ? `Conexão bem-sucedida (token via ${modeLabel})`
             : `Falha ao conectar ao Databricks (modo: ${modeLabel}) - ERRO: ${errMsg}`;
-          await db.saveConnectorTestResult(input.id, isOk, msg);
+          await db.saveConnectorTestResult(input.id, isOk, msg, organizationId);
           return { success: isOk, message: msg };
         }
 
@@ -3475,7 +3649,7 @@ const connectorsRouter = router({
         const { getAdapter } = await import("./adapters/index.js");
         const adapter = getAdapter(config.connectorType);
         if (!adapter) {
-          await db.saveConnectorTestResult(input.id, false, "Adaptador não encontrado para este tipo de conector.");
+          await db.saveConnectorTestResult(input.id, false, "Adaptador não encontrado para este tipo de conector.", organizationId);
           return { success: false, message: "Adaptador não encontrado." };
         }
         const ok = await adapter.testConnection();
@@ -3483,11 +3657,11 @@ const connectorsRouter = router({
         const msg = typeof ok === "boolean"
           ? (isOk ? "Conexão bem-sucedida" : "Falha ao conectar")
           : (ok.message ?? (isOk ? "Conexão bem-sucedida" : "Falha ao conectar"));
-        await db.saveConnectorTestResult(input.id, isOk, msg);
+        await db.saveConnectorTestResult(input.id, isOk, msg, organizationId);
         return { success: isOk, message: msg };
       } catch (err: any) {
         const msg = err?.message ?? "Erro desconhecido";
-        await db.saveConnectorTestResult(input.id, false, msg);
+        await db.saveConnectorTestResult(input.id, false, msg, organizationId);
         return { success: false, message: msg };
       }
     }),
@@ -3496,7 +3670,8 @@ const connectorsRouter = router({
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input, ctx }) => {
       if (ctx.user?.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
-      const config = await db.getConnectorConfigById(input.id);
+      const organizationId = ctx.user.organizationId ?? 1;
+      const config = await db.getConnectorConfigById(input.id, organizationId);
       if (!config) throw new TRPCError({ code: 'NOT_FOUND' });
       try {
         const { metadataCollector } = await import("./metadataCollector.js");
@@ -3531,15 +3706,21 @@ const connectorsRouter = router({
         else {
           return { success: false, message: "Tipo de conector sem crawler disponível.", assetsFound: 0 };
         }
-        // Persiste os ativos — syncAll já resolve o token internamente para todos os conectores
-        await metadataCollector.syncAll();
+        // Persiste somente os ativos descobertos por este conector e neste tenant.
+        await metadataCollector.persistResult(result, organizationId);
+        await db.updateConnectorConfig(config.id, {
+          lastTestedAt: new Date(),
+          lastTestSuccess: result.connectorUsed === "real",
+          lastTestMessage: result.errors[0] ?? "OK",
+        }, organizationId);
+        await cache.flush("assets:");
 
 
         // Detecta linhagem automática por padrão de camadas (bronze→silver→gold)
         if (result.tables.length > 0) {
           const lineageEdges = detectDatabricksLineage(result.tables.map(t => t.name));
           if (lineageEdges.length > 0) {
-            await db.importLineageEdges(lineageEdges).catch(() => {/* ignora erros de duplicata */});
+            await db.importLineageEdges(lineageEdges, organizationId).catch(() => {/* ignora erros de duplicata */});
           }
         }
 

@@ -43,6 +43,7 @@ export interface AgentResult {
 
 export interface OrchestrationState {
   runId: string;
+  organizationId: number;
   assetId?: number;
   assetName?: string;
   sourceSystem?: string;
@@ -83,7 +84,7 @@ async function runInspectionAgent(
     // Carrega atributos do ativo do banco de dados
     let columns = state.columns;
     if (state.assetId && columns.length === 0) {
-      const attrs = await db.getDataAttributes(state.assetId);
+      const attrs = await db.getDataAttributes(state.assetId, state.organizationId);
       columns = attrs.map((a: any) => ({
         name: a.name,
         type: a.dataType ?? "unknown",
@@ -214,14 +215,14 @@ Retorne JSON no formato:
     if (state.assetId) {
       await db.updateDataAsset(state.assetId, {
         sensitivity: classification.sensitivity ?? piiScanResult.suggestedSensitivity,
-      } as any);
+      } as any, state.organizationId);
 
       // Atualiza isPii nos atributos detectados
       for (const piiCol of piiScanResult.piiColumns) {
-        const attrs = await db.getDataAttributes(state.assetId);
+        const attrs = await db.getDataAttributes(state.assetId, state.organizationId);
         const attr = attrs.find((a: any) => a.name === piiCol.name);
         if (attr) {
-          await db.updateDataAttribute(attr.id, { isPii: true } as any);
+          await db.updateDataAttribute(attr.id, { isPii: true } as any, state.organizationId);
         }
       }
     }
@@ -307,7 +308,7 @@ Retorne JSON no formato:
 
     // Persiste termos no glossário
     if (documentation.glossaryTerms?.length) {
-      const existing = await db.getGlossaryTerms({});
+      const existing = await db.getGlossaryTerms({ organizationId: state.organizationId });
       const existingNames = new Set(
         existing.map((t: any) => t.term.toLowerCase().trim())
       );
@@ -485,6 +486,7 @@ const AGENT_GRAPH: Array<{
 // ─── API Pública ──────────────────────────────────────────────────────────────
 
 export interface OrchestratorInput {
+  organizationId: number;
   assetId?: number;
   assetName?: string;
   sourceSystem?: string;
@@ -526,13 +528,12 @@ export async function runGovernanceAgents(
 
   if (input.assetId && (!assetName || columns.length === 0)) {
     try {
-      const assets = await db.getDataAssets();
+      const assets = await db.getDataAssets({ organizationId: input.organizationId });
       const asset = assets.find((a: any) => a.id === input.assetId);
-      if (asset) {
-        assetName = assetName ?? asset.name ?? undefined;
-        sourceSystem = sourceSystem ?? asset.sourceSystem ?? undefined;
-        fullyQualifiedName = fullyQualifiedName ?? asset.fullyQualifiedName ?? undefined;
-      }
+      if (!asset) throw new Error("Asset not found in the authenticated organization");
+      assetName = assetName ?? asset.name ?? undefined;
+      sourceSystem = sourceSystem ?? asset.sourceSystem ?? undefined;
+      fullyQualifiedName = fullyQualifiedName ?? asset.fullyQualifiedName ?? undefined;
     } catch (e) {
       console.warn("[Orchestrator] Falha ao carregar metadados do ativo:", e);
     }
@@ -541,6 +542,7 @@ export async function runGovernanceAgents(
   // Estado inicial do grafo
   let state: OrchestrationState = {
     runId,
+    organizationId: input.organizationId,
     assetId: input.assetId,
     assetName,
     sourceSystem,
@@ -622,13 +624,14 @@ export async function runGovernanceAgents(
  * Executa o pipeline para todos os ativos ativos do catálogo (varredura global).
  * Útil para ser chamado pelo metadataScheduler periodicamente.
  */
-export async function runGlobalGovernanceAgents(options?: {
+export async function runGlobalGovernanceAgents(options: {
+  organizationId: number;
   maxAssets?: number;
   agents?: AgentName[];
 }): Promise<{ processed: number; succeeded: number; failed: number }> {
-  console.log("[Orchestrator] Iniciando varredura global de governança com agentes...");
+  console.log(`[Orchestrator] Iniciando varredura de governança para tenant ${options.organizationId}...`);
 
-  const assets = await db.getDataAssets();
+  const assets = await db.getDataAssets({ organizationId: options.organizationId });
   const activeAssets = assets
     .filter((a: any) => a.status !== "inativo" && a.status !== "deprecated")
     .slice(0, options?.maxAssets ?? 20);
@@ -639,11 +642,12 @@ export async function runGlobalGovernanceAgents(options?: {
   for (const asset of activeAssets) {
     try {
       const result = await runGovernanceAgents({
+        organizationId: options.organizationId,
         assetId: asset.id,
         assetName: asset.name ?? undefined,
         sourceSystem: asset.sourceSystem ?? undefined,
         fullyQualifiedName: asset.fullyQualifiedName ?? undefined,
-        agents: options?.agents,
+        agents: options.agents,
       });
       if (result.success) succeeded++;
       else failed++;
@@ -654,7 +658,7 @@ export async function runGlobalGovernanceAgents(options?: {
   }
 
   console.log(
-    `[Orchestrator] Varredura global concluída: ${succeeded} sucesso(s), ${failed} falha(s).`
+    `[Orchestrator] Varredura do tenant ${options.organizationId} concluída: ${succeeded} sucesso(s), ${failed} falha(s).`
   );
   return { processed: activeAssets.length, succeeded, failed };
 }

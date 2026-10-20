@@ -20,6 +20,8 @@ import { alertUnclassifiedAssets, sendGovernanceAlert } from "./teamsGovernanceA
 import { markAssetPendingPiiReview } from "./databricksPolicyService";
 import { scanTable } from "./piiScanner";
 import { syncDatabricksModels } from "./scripts/databricksMLSync";
+import { randomUUID } from "node:crypto";
+import { runWithLlmContext } from "./_core/llm";
 
 // Por padrão, roda a cada 24 horas.
 const INTERVAL_MS = 60 * 60 * 1000;
@@ -78,10 +80,15 @@ async function runCrawler(): Promise<void> {
     // 5. Executa pipeline multiagente de governança (inspeção, classificação, documentação, auditoria)
     try {
       console.log("[MetadataScheduler] Iniciando pipeline multiagente de governança...");
-      const agentResult = await runGlobalGovernanceAgents({ maxAssets: 10 });
-      console.log(
-        `[MetadataScheduler] Pipeline multiagente concluído: ${agentResult.succeeded} sucesso(s), ${agentResult.failed} falha(s).`
-      );
+      for (const organizationId of await db.getOrganizationIds()) {
+        const agentResult = await runWithLlmContext({
+          userId: null,
+          organizationId,
+          requestId: randomUUID(),
+          operation: "scheduler.governance_agents",
+        }, () => runGlobalGovernanceAgents({ organizationId, maxAssets: 10 }));
+        console.log(`[MetadataScheduler] Tenant ${organizationId}: ${agentResult.succeeded} sucesso(s), ${agentResult.failed} falha(s).`);
+      }
     } catch (agentErr) {
       console.warn("[MetadataScheduler] Falha no pipeline multiagente:", agentErr);
     }

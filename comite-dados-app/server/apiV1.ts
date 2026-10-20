@@ -95,13 +95,14 @@ export function registerPublicApiV1(app: Express) {
   // ── GET /api/v1/assets ────────────────────────────────────────────────────
   app.get(`${base}/assets`, requireScope("assets:read"), async (req, res) => {
     try {
+      const organizationId = (req as any).apiUser.organizationId as number;
       const { limit, offset } = paginate(req);
       const search      = req.query.search      as string | undefined;
       const domainId    = req.query.domainId    ? parseInt(req.query.domainId as string) : undefined;
       const sensitivity = req.query.sensitivity as string | undefined;
       const criticality = req.query.criticality as string | undefined;
       const type        = req.query.type        as string | undefined;
-      const assets = await db.getDataAssets({ search, domainId, sensitivity, criticality, type });
+      const assets = await db.getDataAssets({ search, domainId, sensitivity, criticality, type, organizationId });
       const page = assets.slice(offset, offset + limit);
       res.json({ data: page, total: assets.length, limit, offset });
     } catch (e: any) {
@@ -112,7 +113,8 @@ export function registerPublicApiV1(app: Express) {
   // ── GET /api/v1/assets/:id ────────────────────────────────────────────────
   app.get(`${base}/assets/:id`, requireScope("assets:read"), async (req, res) => {
     try {
-      const asset = await db.getDataAssetById(parseInt(req.params.id));
+      const organizationId = (req as any).apiUser.organizationId as number;
+      const asset = await db.getDataAssetById(parseInt(req.params.id), organizationId);
       if (!asset) return res.status(404).json({ error: "Ativo não encontrado" });
       res.json({ data: asset });
     } catch (e: any) {
@@ -123,8 +125,9 @@ export function registerPublicApiV1(app: Express) {
   // ── GET /api/v1/assets/:id/quality-history ────────────────────────────────
   app.get(`${base}/assets/:id/quality-history`, requireScope("assets:read"), async (req, res) => {
     try {
+      const organizationId = (req as any).apiUser.organizationId as number;
       const days = req.query.days ? parseInt(req.query.days as string) : 30;
-      const history = await db.getDataQualityHistory(parseInt(req.params.id), days);
+      const history = await db.getDataQualityHistory(parseInt(req.params.id), days, organizationId);
       res.json({ data: history });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -138,7 +141,8 @@ export function registerPublicApiV1(app: Express) {
       const status   = req.query.status   as string | undefined;
       const category = req.query.category as string | undefined;
       const search   = req.query.search   as string | undefined;
-      const terms = await db.getGlossaryTerms({ status, category, search });
+      const organizationId = (req as any).apiUser.organizationId as number;
+      const terms = await db.getGlossaryTerms({ organizationId, status, category, search });
       res.json({ data: terms.slice(offset, offset + limit), total: terms.length, limit, offset });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -148,7 +152,7 @@ export function registerPublicApiV1(app: Express) {
   // ── GET /api/v1/metrics ───────────────────────────────────────────────────
   app.get(`${base}/metrics`, requireScope("metrics:read"), async (req, res) => {
     try {
-      const maturity = await db.getMaturityScore();
+      const maturity = await db.getMaturityScore((req as any).apiUser.organizationId as number);
       res.json({ data: maturity });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -158,7 +162,7 @@ export function registerPublicApiV1(app: Express) {
   // ── GET /api/v1/lgpd/assets ───────────────────────────────────────────────
   app.get(`${base}/lgpd/assets`, requireScope("lgpd:read"), async (req, res) => {
     try {
-      const assets = await db.getLgpdAssets();
+      const assets = await db.getLgpdAssets((req as any).apiUser.organizationId as number);
       res.json({ data: assets, total: assets.length });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -168,8 +172,9 @@ export function registerPublicApiV1(app: Express) {
   // ── GET /api/v1/access-requests ───────────────────────────────────────────
   app.get(`${base}/access-requests`, requireScope("access:read"), async (req, res) => {
     try {
+      const organizationId = (req as any).apiUser.organizationId as number;
       const status = req.query.status as string | undefined;
-      const requests = await db.getAccessRequests({ status });
+      const requests = await db.getAccessRequests({ organizationId, status });
       res.json({ data: requests, total: requests.length });
     } catch (e: any) {
       res.status(500).json({ error: e.message });

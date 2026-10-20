@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
+import { toast } from "sonner";
 import {
   Gauge, Plus, Pencil, Trash2, AlertTriangle, CheckCircle2, Clock, ShieldAlert,
 } from "lucide-react";
@@ -210,8 +211,8 @@ function ViolationDialog({ open, onClose, violation, onSaved }: {
   const utils = trpc.useUtils();
   const updateMut = trpc.sla.updateViolationStatus.useMutation({ onSuccess: () => { utils.sla.listViolations.invalidate(); onSaved(); } });
 
-  const [form, setForm] = useState<{ status: string; rootCause: string }>({
-    status: violation?.status ?? "active",
+  const [form, setForm] = useState<{ status: "active" | "investigating" | "resolved"; rootCause: string }>({
+    status: violation?.status === "investigating" || violation?.status === "resolved" ? violation.status : "active",
     rootCause: violation?.rootCause ?? ""
   });
 
@@ -226,7 +227,7 @@ function ViolationDialog({ open, onClose, violation, onSaved }: {
         <div className="space-y-4 py-2">
           <div className="space-y-1">
             <Label>Status do Incidente</Label>
-            <Select value={form.status} onValueChange={v => setForm(f => ({ ...f, status: v }))}>
+            <Select value={form.status} onValueChange={v => setForm(f => ({ ...f, status: v as "active" | "investigating" | "resolved" }))}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="active">Ativo (Aguardando ação)</SelectItem>
@@ -263,7 +264,7 @@ function ViolationDialog({ open, onClose, violation, onSaved }: {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function SlaPage() {
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  const canManageSla = user?.role === "admin" || user?.role === "data_steward";
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [violationDialogOpen, setViolationDialogOpen] = useState(false);
@@ -279,6 +280,14 @@ export default function SlaPage() {
   );
   const deleteMut = trpc.sla.deleteConfig.useMutation({ onSuccess: () => utils.sla.listConfigs.invalidate() });
   const resolveMut = trpc.sla.resolveViolation.useMutation({ onSuccess: () => utils.sla.listViolations.invalidate() });
+  const runEvaluation = trpc.sla.runEvaluation.useMutation({
+    onSuccess: result => {
+      toast.success(`Avaliação ${result.status}: ${result.counters.evaluated} avaliados, ${result.counters.opened} novos, ${result.counters.resolved} resolvidos.`);
+      utils.sla.listViolations.invalidate();
+      utils.sla.listConfigs.invalidate();
+    },
+    onError: error => toast.error(error.message),
+  });
 
   const activeViolations = (violations as any[]).filter((v: SlaViolation) => v.status !== 'resolved').length;
 
@@ -295,11 +304,16 @@ export default function SlaPage() {
             <p className="text-muted-foreground text-sm">Acordos de nível de serviço para qualidade e atualização de dados</p>
           </div>
         </div>
-        {isAdmin && (
+        {canManageSla && (
+          <div className="flex gap-2">
+          <Button variant="outline" onClick={() => runEvaluation.mutate({ dryRun: false })} disabled={runEvaluation.isPending}>
+            {runEvaluation.isPending ? "Avaliando..." : "Executar avaliação"}
+          </Button>
           <Button onClick={() => { setEditConfig(null); setDialogOpen(true); }} className="bg-[#1B3A8C] hover:bg-[#1B3A8C]/90 flex items-center gap-2">
             <Plus className="h-4 w-4" />
             Nova Configuração
           </Button>
+          </div>
         )}
       </div>
 
@@ -354,7 +368,7 @@ export default function SlaPage() {
             <div className="text-center py-8 text-muted-foreground">Carregando...</div>
           ) : configs.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
-              Nenhuma configuração de SLA. {isAdmin && "Clique em \"Nova Configuração\" para começar."}
+              Nenhuma configuração de SLA. {canManageSla && "Clique em \"Nova Configuração\" para começar."}
             </div>
           ) : (
             configs.map((c: SlaConfig) => (
@@ -385,7 +399,7 @@ export default function SlaPage() {
                         {c.alertEmails && <span><strong>Alertas:</strong> {c.alertEmails}</span>}
                       </div>
                     </div>
-                    {isAdmin && (
+                    {canManageSla && (
                       <div className="flex gap-1 ml-4">
                         <Button size="icon" variant="ghost" onClick={() => { setEditConfig(c); setDialogOpen(true); }}>
                           <Pencil className="h-4 w-4" />
@@ -448,12 +462,12 @@ export default function SlaPage() {
                             <Clock className="h-3 w-3" /> Investigando
                           </Badge>
                         ) : null}
-                        {isAdmin && v.status !== 'resolved' && (
+                        {canManageSla && v.status !== 'resolved' && (
                           <Button size="sm" variant="outline" onClick={() => { setSelectedViolation(v); setViolationDialogOpen(true); }} className="text-xs">
                             Gerenciar Incidente
                           </Button>
                         )}
-                        {isAdmin && v.status === 'resolved' && (
+                        {canManageSla && v.status === 'resolved' && (
                           <Button size="sm" variant="ghost" onClick={() => { setSelectedViolation(v); setViolationDialogOpen(true); }} className="text-xs">
                             Ver Relatório
                           </Button>

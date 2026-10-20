@@ -36,6 +36,20 @@
       "when": 1782511739751,
       "tag": "0004_add_auditoria_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792460343671,
+      "tag": "0005_hub_nexa_gates",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792460344671,
+      "tag": "0006_security_sla_finops_integrations",
+      "breakpoints": true
     }
   ]
 }

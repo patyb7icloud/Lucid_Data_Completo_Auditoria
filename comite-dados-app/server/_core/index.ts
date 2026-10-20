@@ -26,6 +26,8 @@ import { serveStatic, setupVite } from "./vite";
 import { startAttendanceScheduler, stopAttendanceScheduler } from "../attendanceScheduler";
 import { startTicketAlertScheduler, stopTicketAlertScheduler } from "../ticketAlertScheduler";
 import { startMetadataScheduler, stopMetadataScheduler } from "../metadataScheduler";
+import { startSlaScheduler, stopSlaScheduler } from "../slaScheduler";
+import { startProjectSyncScheduler, stopProjectSyncScheduler } from "../projectSyncScheduler";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -120,6 +122,10 @@ async function startServer() {
     startTicketAlertScheduler();
     // Inicia o job de varredura automática de metadados (SAP, Snowflake)
     startMetadataScheduler();
+    // Avalia diariamente os SLAs ativos, isolados por organização e com lock no banco.
+    startSlaScheduler();
+    // Processa somente sincronizações explicitamente enfileiradas para credenciais configuradas.
+    startProjectSyncScheduler();
   });
 
   async function shutdown(signal: NodeJS.Signals) {
@@ -130,6 +136,8 @@ async function startServer() {
     stopAttendanceScheduler();
     stopTicketAlertScheduler();
     stopMetadataScheduler();
+    stopSlaScheduler();
+    stopProjectSyncScheduler();
 
     await new Promise<void>((resolve) => {
       server.close((error) => {

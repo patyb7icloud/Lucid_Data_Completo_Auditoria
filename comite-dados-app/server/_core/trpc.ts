@@ -2,13 +2,34 @@ import { NOT_ADMIN_ERR_MSG, UNAUTHED_ERR_MSG } from '@shared/const';
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
+import { randomUUID } from "node:crypto";
+import { runWithLlmContext } from "./llm";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
 });
 
 export const router = t.router;
-export const publicProcedure = t.procedure;
+
+const requestContext = t.middleware(async opts => {
+  const { ctx, next, path } = opts;
+  const headerRequestId = ctx.req.headers["x-request-id"];
+  const requestId = Array.isArray(headerRequestId)
+    ? headerRequestId[0]
+    : headerRequestId ?? randomUUID();
+
+  return runWithLlmContext(
+    {
+      userId: ctx.user?.id ?? null,
+      organizationId: ctx.user?.organizationId ?? null,
+      requestId,
+      operation: String(path),
+    },
+    () => next(),
+  );
+});
+
+export const publicProcedure = t.procedure.use(requestContext);
 
 const requireUser = t.middleware(async opts => {
   const { ctx, next } = opts;
@@ -25,9 +46,9 @@ const requireUser = t.middleware(async opts => {
   });
 });
 
-export const protectedProcedure = t.procedure.use(requireUser);
+export const protectedProcedure = publicProcedure.use(requireUser);
 
-export const adminProcedure = t.procedure.use(
+export const adminProcedure = publicProcedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
 
@@ -48,7 +69,7 @@ export const adminProcedure = t.procedure.use(
  * stewardProcedure — requer autenticação + role admin OU data_steward.
  * Usado para operações que afetam catálogos externos (ex: write-back ao Databricks).
  */
-export const stewardProcedure = t.procedure.use(
+export const stewardProcedure = publicProcedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
 

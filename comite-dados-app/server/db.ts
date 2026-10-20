@@ -102,6 +102,13 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   await db.insert(users).values(values).onConflictDoUpdate({ target: users.openId, set: updateSet });
 }
 
+export async function getOrganizationIds(): Promise<number[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select({ id: organizations.id }).from(organizations).where(eq(organizations.active, true));
+  return rows.map(row => row.id);
+}
+
 export async function getUserByOpenId(openId: string) {
   const db = await getDb();
   if (!db) return undefined;
@@ -405,11 +412,15 @@ export async function updateChecklistItem(id: number, data: Partial<InsertImplem
 }
 
 // ─── AI Chat History ──────────────────────────────────────────────────────────
-export async function getAiChatHistory(sessionId: string) {
+export async function getAiChatHistory(sessionId: string, organizationId: number, userId: number) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(aiChatHistory)
-    .where(eq(aiChatHistory.sessionId, sessionId))
+    .where(and(
+      eq(aiChatHistory.sessionId, sessionId),
+      eq(aiChatHistory.organizationId, organizationId),
+      eq(aiChatHistory.userId, userId),
+    ))
     .orderBy(aiChatHistory.createdAt);
 }
 
@@ -420,7 +431,7 @@ export async function saveAiMessage(data: InsertAiChatHistory) {
 }
 
 // ─── ServiceNow Tickets ───────────────────────────────────────────────────────
-export async function getServicenowTickets(domainId?: number) {
+export async function getServicenowTickets(domainId: number | undefined, organizationId: number) {
   const db = await getDb();
   if (!db) return [];
   const base = db
@@ -443,11 +454,10 @@ export async function getServicenowTickets(domainId?: number) {
     })
     .from(servicenowTickets)
     .leftJoin(meetings, eq(servicenowTickets.meetingId, meetings.id))
-    .orderBy(desc(servicenowTickets.createdAt));
-  if (domainId) {
-    return base.where(eq(servicenowTickets.domainId, domainId));
-  }
-  return base;
+    .$dynamic();
+  const conditions = [eq(servicenowTickets.organizationId, organizationId)];
+  if (domainId) conditions.push(eq(servicenowTickets.domainId, domainId) as any);
+  return base.where(and(...conditions)).orderBy(desc(servicenowTickets.createdAt));
 }
 
 export async function createServicenowTicket(data: InsertServicenowTicket) {
@@ -456,10 +466,13 @@ export async function createServicenowTicket(data: InsertServicenowTicket) {
   return db.insert(servicenowTickets).values(data);
 }
 
-export async function updateServicenowTicket(id: number, data: Partial<InsertServicenowTicket>) {
+export async function updateServicenowTicket(id: number, data: Partial<InsertServicenowTicket>, organizationId?: number) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  return db.update(servicenowTickets).set(data).where(eq(servicenowTickets.id, id));
+  const condition = organizationId == null
+    ? eq(servicenowTickets.id, id)
+    : and(eq(servicenowTickets.id, id), eq(servicenowTickets.organizationId, organizationId));
+  return db.update(servicenowTickets).set(data).where(condition);
 }
 
 // ─── Email Notifications ────────────────────────────────────────────────
@@ -521,7 +534,22 @@ export async function upsertNotificationPreferences(data: InsertNotificationPref
 // ─── Metrics / Dashboard ──────────────────────────────────────────────────────
 export async function getDashboardMetrics() {
   const db = await getDb();
-  if (!db) return null;
+  if (!db) {
+    return {
+      totalParticipants: 0,
+      activeParticipants: 0,
+      totalDomains: 0,
+      totalMeetings: 0,
+      upcomingMeetings: 0,
+      totalInvites: 0,
+      confirmedInvites: 0,
+      pendingInvites: 0,
+      openTickets: 0,
+      roleDistribution: [],
+      domainProgress: [],
+      assetCriticality: [],
+    };
+  }
 
   const [totalParticipants] = await db.select({ count: count() }).from(participants);
   const [activeParticipants] = await db.select({ count: count() }).from(participants).where(eq(participants.status, 'ativo'));
@@ -1477,7 +1505,7 @@ export async function getDataAssets(opts?: {
   if (opts?.sensitivity) conditions.push(eq(dataAssets.sensitivity, opts.sensitivity as any));
   if (opts?.criticality) conditions.push(eq(dataAssets.criticality, opts.criticality as any));
   if (opts?.type) conditions.push(eq(dataAssets.type, opts.type as any));
-  if (opts?.organizationId) conditions.push(eq(dataAssets.organizationId, opts.organizationId));
+  if (opts?.organizationId != null) conditions.push(eq(dataAssets.organizationId, opts.organizationId));
 
   if (opts?.search && opts.search.trim()) {
     const terms = expandSearchTerms(opts.search.trim());
@@ -1522,7 +1550,7 @@ export async function getDataAssets(opts?: {
   return enrichAssetsWithScores(result);
 }
 
-export async function getDataAssetById(id: number) {
+export async function getDataAssetById(id: number, organizationId?: number) {
   const db = await getDb();
   if (!db) return undefined;
   const ownerAlias = alias(participants, 'owner');
@@ -1544,7 +1572,9 @@ export async function getDataAssetById(id: number) {
     .leftJoin(domains, eq(dataAssets.domainId, domains.id))
     .leftJoin(ownerAlias, eq(dataAssets.ownerId, ownerAlias.id))
     .leftJoin(stewardAlias, eq(dataAssets.stewardId, stewardAlias.id))
-    .where(eq(dataAssets.id, id))
+    .where(organizationId == null
+      ? eq(dataAssets.id, id)
+      : and(eq(dataAssets.id, id), eq(dataAssets.organizationId, organizationId)))
     .limit(1);
   if (!result[0]) return undefined;
   const enriched = await enrichAssetsWithScores([result[0]]);
@@ -1558,13 +1588,13 @@ export async function createDataAsset(data: InsertDataAsset) {
   return inserted;
 }
 
-export async function updateDataAsset(id: number, data: Partial<InsertDataAsset>) {
+export async function updateDataAsset(id: number, data: Partial<InsertDataAsset>, organizationId?: number) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   
   // Se estiver atualizando o score, salva no histórico para tendências
   if (data.qualityScore !== undefined) {
-    const asset = await getDataAssetById(id);
+    const asset = await getDataAssetById(id, organizationId);
     if (asset) {
       await db.insert(dataQualityHistory).values({
         assetId: id,
@@ -1575,31 +1605,47 @@ export async function updateDataAsset(id: number, data: Partial<InsertDataAsset>
     }
   }
 
-  return db.update(dataAssets).set(data).where(eq(dataAssets.id, id));
+  return db.update(dataAssets).set(data).where(organizationId == null
+    ? eq(dataAssets.id, id)
+    : and(eq(dataAssets.id, id), eq(dataAssets.organizationId, organizationId)));
 }
 
 /** Retorna o histórico de qualidade de um ativo para gráficos de tendência */
-export async function getDataQualityHistory(assetId: number, days = 30) {
+export async function getDataQualityHistory(assetId: number, days = 30, organizationId?: number) {
   const db = await getDb();
   if (!db) return [];
   
   const dateLimit = new Date();
   dateLimit.setDate(dateLimit.getDate() - days);
 
+  const conditions = [
+    eq(dataQualityHistory.assetId, assetId),
+    gte(dataQualityHistory.measuredAt, dateLimit),
+  ];
+  if (organizationId != null) conditions.push(eq(dataQualityHistory.organizationId, organizationId) as any);
   return db.select()
     .from(dataQualityHistory)
-    .where(and(
-      eq(dataQualityHistory.assetId, assetId),
-      gte(dataQualityHistory.measuredAt, dateLimit)
-    ))
+    .where(and(...conditions))
     .orderBy(asc(dataQualityHistory.measuredAt));
 }
 
 // ─── Data Attributes ──────────────────────────────────────────────────────────
-export async function getDataAttributes(assetId: number) {
+export async function getDataAttributes(assetId: number, organizationId?: number) {
   const db = await getDb();
   if (!db) return [];
+  if (organizationId != null && !await getDataAssetById(assetId, organizationId)) return [];
   return db.select().from(dataAttributes).where(eq(dataAttributes.assetId, assetId)).orderBy(dataAttributes.name);
+}
+
+export async function getDataAttributeById(id: number, organizationId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.select({ attribute: dataAttributes })
+    .from(dataAttributes)
+    .innerJoin(dataAssets, eq(dataAttributes.assetId, dataAssets.id))
+    .where(and(eq(dataAttributes.id, id), eq(dataAssets.organizationId, organizationId)))
+    .limit(1);
+  return rows[0]?.attribute;
 }
 
 export async function createDataAttribute(data: InsertDataAttribute) {
@@ -1609,29 +1655,43 @@ export async function createDataAttribute(data: InsertDataAttribute) {
   return inserted;
 }
 
-export async function updateDataAttribute(id: number, data: Partial<InsertDataAttribute>) {
+export async function updateDataAttribute(id: number, data: Partial<InsertDataAttribute>, organizationId?: number) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
+  if (organizationId != null && !await getDataAttributeById(id, organizationId)) return undefined;
   return db.update(dataAttributes).set(data).where(eq(dataAttributes.id, id));
 }
 
 // ─── Data Lineage ─────────────────────────────────────────────────────────────
-export async function getDataLineage(assetId: number) {
+export async function getDataLineage(assetId: number, organizationId?: number) {
   const db = await getDb();
   if (!db) return [];
+  if (organizationId != null && !await getDataAssetById(assetId, organizationId)) return [];
 
   const queue = [assetId];
   const visitedAssets = new Set<number>();
   const collectedEdges = new Map<number, unknown>();
+  const sourceAsset = alias(dataAssets, "lineage_source_asset");
+  const targetAsset = alias(dataAssets, "lineage_target_asset");
 
   while (queue.length > 0) {
     const currentAssetId = queue.shift()!;
     if (visitedAssets.has(currentAssetId)) continue;
     visitedAssets.add(currentAssetId);
 
-    const relatedEdges = await db.select().from(dataLineage).where(
-      sql`${dataLineage.sourceAssetId} = ${currentAssetId} OR ${dataLineage.targetAssetId} = ${currentAssetId}`
-    );
+    const relatedEdges = organizationId == null
+      ? await db.select().from(dataLineage).where(
+          sql`${dataLineage.sourceAssetId} = ${currentAssetId} OR ${dataLineage.targetAssetId} = ${currentAssetId}`
+        )
+      : (await db.select({ edge: dataLineage })
+          .from(dataLineage)
+          .innerJoin(sourceAsset, eq(dataLineage.sourceAssetId, sourceAsset.id))
+          .innerJoin(targetAsset, eq(dataLineage.targetAssetId, targetAsset.id))
+          .where(and(
+            sql`${dataLineage.sourceAssetId} = ${currentAssetId} OR ${dataLineage.targetAssetId} = ${currentAssetId}`,
+            eq(sourceAsset.organizationId, organizationId),
+            eq(targetAsset.organizationId, organizationId),
+          ))).map(row => row.edge);
 
     for (const edge of relatedEdges) {
       collectedEdges.set(edge.id, edge);
@@ -1649,10 +1709,19 @@ export async function createDataLineage(data: InsertDataLineage) {
   return db.insert(dataLineage).values(data);
 }
 
-export async function getAllDataLineage() {
+export async function getAllDataLineage(organizationId?: number) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(dataLineage).orderBy(desc(dataLineage.createdAt));
+  if (organizationId == null) return db.select().from(dataLineage).orderBy(desc(dataLineage.createdAt));
+  const sourceAsset = alias(dataAssets, "all_lineage_source_asset");
+  const targetAsset = alias(dataAssets, "all_lineage_target_asset");
+  const rows = await db.select({ edge: dataLineage })
+    .from(dataLineage)
+    .innerJoin(sourceAsset, eq(dataLineage.sourceAssetId, sourceAsset.id))
+    .innerJoin(targetAsset, eq(dataLineage.targetAssetId, targetAsset.id))
+    .where(and(eq(sourceAsset.organizationId, organizationId), eq(targetAsset.organizationId, organizationId)))
+    .orderBy(desc(dataLineage.createdAt));
+  return rows.map(row => row.edge);
 }
 
 /**
@@ -1667,11 +1736,11 @@ export async function importLineageEdges(edges: Array<{
   transformationRule?: string;
   sourceColumn?: string;
   targetColumn?: string;
-}>): Promise<{ imported: number; skipped: number }> {
+}>, organizationId?: number): Promise<{ imported: number; skipped: number }> {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
 
-  const allAssets = await getDataAssets();
+  const allAssets = await getDataAssets(organizationId == null ? undefined : { organizationId });
   const nameMap = new Map(allAssets.map(a => [a.name.toUpperCase(), a.id]));
 
   const resolveAssetId = (edgeName: string): number | undefined => {
@@ -1743,9 +1812,10 @@ export async function importLineageEdges(edges: Array<{
 }
 
 // ─── Data Quality ─────────────────────────────────────────────────────────────
-export async function getDataQualityChecks(assetId: number) {
+export async function getDataQualityChecks(assetId: number, organizationId?: number) {
   const db = await getDb();
   if (!db) return [];
+  if (organizationId != null && !await getDataAssetById(assetId, organizationId)) return [];
   return db.select().from(dataQualityChecks).where(eq(dataQualityChecks.assetId, assetId)).orderBy(desc(dataQualityChecks.lastRunAt));
 }
 
@@ -1807,140 +1877,131 @@ export async function createAccessRequest(data: InsertAccessRequest) {
 }
 
 export async function getAccessRequests(opts: {
+  organizationId: number;
   status?: string;
   assetId?: number;
   requesterId?: number;
-  // ownerId e stewardId aqui são users.id (usuário logado).
-  // A função resolve internamente para participants.id via JOIN.
   ownerId?: number;
   stewardId?: number;
 }) {
   const db = await getDb();
   if (!db) return [];
 
-  // Resolve users.id → participants.id para ownerId
   let ownerParticipantId: number | undefined;
   if (opts.ownerId) {
-    const rows = await db.select({ id: participants.id })
-      .from(participants)
-      .where(eq(participants.userId, opts.ownerId))
-      .limit(1);
+    const rows = await db.select({ id: participants.id }).from(participants)
+      .where(eq(participants.userId, opts.ownerId)).limit(1);
     ownerParticipantId = rows[0]?.id;
-    if (!ownerParticipantId) return []; // usuário não tem participante vinculado
+    if (!ownerParticipantId) return [];
   }
-
-  // Resolve users.id → participants.id para stewardId
   let stewardParticipantId: number | undefined;
   if (opts.stewardId) {
-    const rows = await db.select({ id: participants.id })
-      .from(participants)
-      .where(eq(participants.userId, opts.stewardId))
-      .limit(1);
+    const rows = await db.select({ id: participants.id }).from(participants)
+      .where(eq(participants.userId, opts.stewardId)).limit(1);
     stewardParticipantId = rows[0]?.id;
-    if (!stewardParticipantId) return []; // usuário não tem participante vinculado
+    if (!stewardParticipantId) return [];
   }
 
-  const conditions: any[] = [];
+  const conditions: any[] = [eq(accessRequests.organizationId, opts.organizationId)];
   if (opts.status) conditions.push(eq(accessRequests.status, opts.status as any));
   if (opts.assetId) conditions.push(eq(accessRequests.assetId, opts.assetId));
   if (opts.requesterId) conditions.push(eq(accessRequests.requesterId, opts.requesterId));
   if (ownerParticipantId) conditions.push(eq(accessRequests.ownerId, ownerParticipantId));
   if (stewardParticipantId) conditions.push(eq(accessRequests.stewardId, stewardParticipantId));
 
-  const baseQuery = db
-    .select({
-      id: accessRequests.id,
-      ticketNumber: accessRequests.ticketNumber,
-      assetId: accessRequests.assetId,
-      requesterId: accessRequests.requesterId,
-      requesterName: accessRequests.requesterName,
-      requesterEmail: accessRequests.requesterEmail,
-      nivelAcesso: accessRequests.nivelAcesso,
-      papelGrupo: accessRequests.papelGrupo,
-      baseLegal: accessRequests.baseLegal,
-      finalidade: accessRequests.finalidade,
-      prazoNecessidade: accessRequests.prazoNecessidade,
-      checklistJson: accessRequests.checklistJson,
-      envolveTerceiros: accessRequests.envolveTerceiros,
-      statusOwner: accessRequests.statusOwner,
-      ownerApprovedAt: accessRequests.ownerApprovedAt,
-      ownerComment: accessRequests.ownerComment,
-      ownerId: accessRequests.ownerId,
-      statusSteward: accessRequests.statusSteward,
-      stewardApprovedAt: accessRequests.stewardApprovedAt,
-      stewardComment: accessRequests.stewardComment,
-      stewardId: accessRequests.stewardId,
-      status: accessRequests.status,
-      flowType: accessRequests.flowType,
-      priority: accessRequests.priority,
-      createdAt: accessRequests.createdAt,
-      updatedAt: accessRequests.updatedAt,
-      // Dados do ativo via JOIN
-      assetName: dataAssets.name,
-      assetType: dataAssets.type,
-      assetSensitivity: dataAssets.sensitivity,
-      assetCriticality: dataAssets.criticality,
-      assetBusinessArea: dataAssets.businessArea,
-      assetSourceSystem: dataAssets.sourceSystem,
-    })
+  return db.select({
+    id: accessRequests.id,
+    ticketNumber: accessRequests.ticketNumber,
+    organizationId: accessRequests.organizationId,
+    assetId: accessRequests.assetId,
+    requesterId: accessRequests.requesterId,
+    requesterName: accessRequests.requesterName,
+    requesterEmail: accessRequests.requesterEmail,
+    nivelAcesso: accessRequests.nivelAcesso,
+    papelGrupo: accessRequests.papelGrupo,
+    baseLegal: accessRequests.baseLegal,
+    finalidade: accessRequests.finalidade,
+    prazoNecessidade: accessRequests.prazoNecessidade,
+    checklistJson: accessRequests.checklistJson,
+    envolveTerceiros: accessRequests.envolveTerceiros,
+    statusOwner: accessRequests.statusOwner,
+    ownerApprovedAt: accessRequests.ownerApprovedAt,
+    ownerApprovedByUserId: accessRequests.ownerApprovedByUserId,
+    ownerComment: accessRequests.ownerComment,
+    ownerId: accessRequests.ownerId,
+    statusSteward: accessRequests.statusSteward,
+    stewardApprovedAt: accessRequests.stewardApprovedAt,
+    stewardApprovedByUserId: accessRequests.stewardApprovedByUserId,
+    stewardComment: accessRequests.stewardComment,
+    stewardId: accessRequests.stewardId,
+    status: accessRequests.status,
+    flowType: accessRequests.flowType,
+    priority: accessRequests.priority,
+    createdAt: accessRequests.createdAt,
+    updatedAt: accessRequests.updatedAt,
+    assetName: dataAssets.name,
+    assetType: dataAssets.type,
+    assetSensitivity: dataAssets.sensitivity,
+    assetCriticality: dataAssets.criticality,
+    assetBusinessArea: dataAssets.businessArea,
+    assetSourceSystem: dataAssets.sourceSystem,
+  })
     .from(accessRequests)
-    .leftJoin(dataAssets, eq(accessRequests.assetId, dataAssets.id))
-    .$dynamic();
-
-  let q = conditions.length > 0 ? baseQuery.where(and(...conditions)) : baseQuery;
-  return q.orderBy(desc(accessRequests.createdAt));
+    .leftJoin(dataAssets, and(
+      eq(accessRequests.assetId, dataAssets.id),
+      eq(accessRequests.organizationId, dataAssets.organizationId),
+    ))
+    .where(and(...conditions))
+    .orderBy(desc(accessRequests.createdAt));
 }
 
-export async function getAccessRequestById(id: number) {
+export async function getAccessRequestById(id: number, organizationId: number) {
   const db = await getDb();
   if (!db) return null;
-  const rows = await db.select().from(accessRequests).where(eq(accessRequests.id, id)).limit(1);
+  const rows = await db.select().from(accessRequests).where(and(
+    eq(accessRequests.id, id), eq(accessRequests.organizationId, organizationId),
+  )).limit(1);
   return rows[0] ?? null;
 }
 
-export async function approveByOwner(id: number, comment: string) {
+export async function approveByOwner(id: number, comment: string, organizationId: number, actorId: number) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   return db.update(accessRequests).set({
-    statusOwner: "aprovado",
-    ownerApprovedAt: new Date(),
-    ownerComment: comment,
-    status: "pendente_steward",
-    statusSteward: "pendente",
-  }).where(eq(accessRequests.id, id));
+    statusOwner: "aprovado", ownerApprovedAt: new Date(), ownerApprovedByUserId: actorId,
+    ownerComment: comment, status: "pendente_steward", statusSteward: "pendente",
+  }).where(and(eq(accessRequests.id, id), eq(accessRequests.organizationId, organizationId), eq(accessRequests.status, "pendente_owner")))
+    .returning({ id: accessRequests.id });
 }
 
-export async function rejectByOwner(id: number, comment: string) {
+export async function rejectByOwner(id: number, comment: string, organizationId: number, actorId: number) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   return db.update(accessRequests).set({
-    statusOwner: "rejeitado",
-    ownerApprovedAt: new Date(),
-    ownerComment: comment,
-    status: "rejeitado_owner",
-  }).where(eq(accessRequests.id, id));
+    statusOwner: "rejeitado", ownerApprovedAt: new Date(), ownerApprovedByUserId: actorId,
+    ownerComment: comment, status: "rejeitado_owner",
+  }).where(and(eq(accessRequests.id, id), eq(accessRequests.organizationId, organizationId), eq(accessRequests.status, "pendente_owner")))
+    .returning({ id: accessRequests.id });
 }
 
-export async function approveBySteward(id: number, comment: string) {
+export async function approveBySteward(id: number, comment: string, organizationId: number, actorId: number) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   return db.update(accessRequests).set({
-    statusSteward: "aprovado",
-    stewardApprovedAt: new Date(),
-    stewardComment: comment,
-    status: "aprovado",
-  }).where(eq(accessRequests.id, id));
+    statusSteward: "aprovado", stewardApprovedAt: new Date(), stewardApprovedByUserId: actorId,
+    stewardComment: comment, status: "aprovado",
+  }).where(and(eq(accessRequests.id, id), eq(accessRequests.organizationId, organizationId), eq(accessRequests.status, "pendente_steward")))
+    .returning({ id: accessRequests.id });
 }
 
-export async function rejectBySteward(id: number, comment: string) {
+export async function rejectBySteward(id: number, comment: string, organizationId: number, actorId: number) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   return db.update(accessRequests).set({
-    statusSteward: "rejeitado",
-    stewardApprovedAt: new Date(),
-    stewardComment: comment,
-    status: "rejeitado_steward",
-  }).where(eq(accessRequests.id, id));
+    statusSteward: "rejeitado", stewardApprovedAt: new Date(), stewardApprovedByUserId: actorId,
+    stewardComment: comment, status: "rejeitado_steward",
+  }).where(and(eq(accessRequests.id, id), eq(accessRequests.organizationId, organizationId), eq(accessRequests.status, "pendente_steward")))
+    .returning({ id: accessRequests.id });
 }
 
 // ─── ServiceNow Tickets ──────────────────────────────────────────────────────
@@ -1950,12 +2011,12 @@ export async function createServiceNowTicket(data: InsertServicenowTicket) {
   return db.insert(servicenowTickets).values(data);
 }
 
-export async function getServiceNowTickets(opts?: { assetId?: number; domainId?: number }) {
+export async function getServiceNowTickets(opts: { organizationId: number; assetId?: number; domainId?: number }) {
   const db = await getDb();
   if (!db) return [];
   let query = db.select().from(servicenowTickets).$dynamic();
   
-  const conditions = [];
+  const conditions = [eq(servicenowTickets.organizationId, opts.organizationId)];
   if (opts?.assetId) conditions.push(eq(servicenowTickets.participantId, opts.assetId)); // Usando participantId como ref temporária ou similar
   if (opts?.domainId) conditions.push(eq(servicenowTickets.domainId, opts.domainId));
   
@@ -1968,13 +2029,20 @@ export async function createAuditLog(data: Omit<InsertAuditLog, 'id' | 'createdA
   const db = await getDb();
   if (!db) return; // silently skip if no DB (dev mode without DB)
   try {
-    await db.insert(auditLog).values(data as InsertAuditLog);
+    let organizationId = data.organizationId;
+    if (organizationId == null && data.userId != null) {
+      const [actor] = await db.select({ organizationId: users.organizationId })
+        .from(users).where(eq(users.id, data.userId)).limit(1);
+      organizationId = actor?.organizationId ?? 1;
+    }
+    await db.insert(auditLog).values({ ...data, organizationId: organizationId ?? 1 } as InsertAuditLog);
   } catch {
     // Nunca deixar o audit log quebrar o fluxo principal
   }
 }
 
 export async function getAuditLogs(opts: {
+  organizationId: number;
   userId?: number;
   action?: string;
   entity?: string;
@@ -1982,10 +2050,10 @@ export async function getAuditLogs(opts: {
   dateTo?: Date;
   limit?: number;
   offset?: number;
-} = {}) {
+}) {
   const db = await getDb();
   if (!db) return [];
-  const conditions: ReturnType<typeof eq>[] = [];
+  const conditions: ReturnType<typeof eq>[] = [eq(auditLog.organizationId, opts.organizationId)];
   if (opts.userId) conditions.push(eq(auditLog.userId, opts.userId));
   if (opts.action) conditions.push(eq(auditLog.action, opts.action as InsertAuditLog['action']));
   if (opts.entity) conditions.push(eq(auditLog.entity, opts.entity));
@@ -1999,14 +2067,15 @@ export async function getAuditLogs(opts: {
 
 // ─── Business Glossary ───────────────────────────────────────────────────────
 export async function getGlossaryTerms(opts: {
+  organizationId: number;
   status?: string;
   category?: string;
   search?: string;
   domainId?: number;
-} = {}) {
+}) {
   const db = await getDb();
   if (!db) return [];
-  const conditions: ReturnType<typeof eq>[] = [];
+  const conditions: ReturnType<typeof eq>[] = [eq(businessGlossary.organizationId, opts.organizationId)];
   if (opts.status) conditions.push(eq(businessGlossary.status, opts.status as any));
   if (opts.category) conditions.push(eq(businessGlossary.category, opts.category));
   if (opts.domainId) conditions.push(eq(businessGlossary.domainId, opts.domainId));
@@ -2020,10 +2089,12 @@ export async function getGlossaryTerms(opts: {
   return q.orderBy(businessGlossary.term);
 }
 
-export async function getGlossaryTermById(id: number) {
+export async function getGlossaryTermById(id: number, organizationId: number) {
   const db = await getDb();
   if (!db) return null;
-  const rows = await db.select().from(businessGlossary).where(eq(businessGlossary.id, id)).limit(1);
+  const rows = await db.select().from(businessGlossary).where(and(
+    eq(businessGlossary.id, id), eq(businessGlossary.organizationId, organizationId),
+  )).limit(1);
   return rows[0] ?? null;
 }
 
@@ -2034,25 +2105,30 @@ export async function createGlossaryTerm(data: Omit<InsertBusinessGlossaryTerm, 
   return inserted;
 }
 
-export async function updateGlossaryTerm(id: number, data: Partial<InsertBusinessGlossaryTerm>) {
+export async function updateGlossaryTerm(id: number, data: Partial<InsertBusinessGlossaryTerm>, organizationId: number) {
   const db = await getDb();
   if (!db) throw new Error('DB not available');
-  return db.update(businessGlossary).set({ ...data, updatedAt: new Date() }).where(eq(businessGlossary.id, id));
+  const { organizationId: _ignoredOrganizationId, ...safeData } = data;
+  return db.update(businessGlossary).set({ ...safeData, updatedAt: new Date() }).where(and(
+    eq(businessGlossary.id, id), eq(businessGlossary.organizationId, organizationId),
+  )).returning({ id: businessGlossary.id });
 }
 
-export async function deleteGlossaryTerm(id: number) {
+export async function deleteGlossaryTerm(id: number, organizationId: number) {
   const db = await getDb();
   if (!db) throw new Error('DB not available');
-  return db.delete(businessGlossary).where(eq(businessGlossary.id, id));
+  return db.delete(businessGlossary).where(and(
+    eq(businessGlossary.id, id), eq(businessGlossary.organizationId, organizationId),
+  )).returning({ id: businessGlossary.id });
 }
 
-export async function getGlossaryCategories() {
+export async function getGlossaryCategories(organizationId: number) {
   const db = await getDb();
   if (!db) return [];
   const rows = await db
     .select({ category: businessGlossary.category })
     .from(businessGlossary)
-    .where(isNotNull(businessGlossary.category))
+    .where(and(isNotNull(businessGlossary.category), eq(businessGlossary.organizationId, organizationId)))
     .groupBy(businessGlossary.category)
     .orderBy(businessGlossary.category);
   return rows.map(r => r.category).filter(Boolean) as string[];
@@ -2118,52 +2194,66 @@ export async function getOrganizationUsage(orgId: number): Promise<{ userCount: 
 }
 
 // ─── SLA Configs ──────────────────────────────────────────────────────────────
-export async function getSlaConfigs(opts?: { entityType?: string; entityId?: number; active?: boolean }) {
+export async function getSlaConfigs(organizationId: number, opts?: { entityType?: string; entityId?: number; active?: boolean }) {
   const db = await getDb();
   if (!db) return [];
-  const conditions = [];
-  if (opts?.entityType) conditions.push(eq(slaConfigs.entityType, opts.entityType as any));
-  if (opts?.entityId) conditions.push(eq(slaConfigs.entityId, opts.entityId));
-  if (opts?.active !== undefined) conditions.push(eq(slaConfigs.active, opts.active));
-  const q = db.select().from(slaConfigs);
-  return conditions.length > 0 ? q.where(and(...conditions)) : q;
+  const conditions = [eq(slaConfigs.organizationId, organizationId)];
+  if (opts?.entityType) conditions.push(eq(slaConfigs.entityType, opts.entityType as any) as any);
+  if (opts?.entityId != null) conditions.push(eq(slaConfigs.entityId, opts.entityId) as any);
+  if (opts?.active !== undefined) conditions.push(eq(slaConfigs.active, opts.active) as any);
+  return db.select().from(slaConfigs).where(and(...conditions));
 }
 
-export async function getSlaConfigById(id: number) {
+export async function getSlaConfigById(id: number, organizationId: number) {
   const db = await getDb();
   if (!db) return null;
-  const rows = await db.select().from(slaConfigs).where(eq(slaConfigs.id, id)).limit(1);
+  const rows = await db.select().from(slaConfigs).where(and(
+    eq(slaConfigs.id, id), eq(slaConfigs.organizationId, organizationId),
+  )).limit(1);
   return rows[0] ?? null;
 }
 
 export async function createSlaConfig(data: Omit<InsertSlaConfig, 'id' | 'createdAt' | 'updatedAt'>) {
   const db = await getDb();
   if (!db) throw new Error('DB not available');
-  return db.insert(slaConfigs).values(data as InsertSlaConfig);
+  return db.insert(slaConfigs).values(data as InsertSlaConfig).returning();
 }
 
-export async function updateSlaConfig(id: number, data: Partial<InsertSlaConfig>) {
+export async function updateSlaConfig(id: number, data: Partial<InsertSlaConfig>, organizationId: number) {
   const db = await getDb();
   if (!db) throw new Error('DB not available');
-  return db.update(slaConfigs).set({ ...data, updatedAt: new Date() }).where(eq(slaConfigs.id, id));
+  const { organizationId: _ignoredOrganizationId, ...safeData } = data;
+  return db.update(slaConfigs).set({ ...safeData, updatedAt: new Date() }).where(and(
+    eq(slaConfigs.id, id), eq(slaConfigs.organizationId, organizationId),
+  )).returning({ id: slaConfigs.id });
 }
 
-export async function deleteSlaConfig(id: number) {
+export async function deleteSlaConfig(id: number, organizationId: number) {
   const db = await getDb();
   if (!db) throw new Error('DB not available');
-  return db.delete(slaConfigs).where(eq(slaConfigs.id, id));
+  return db.delete(slaConfigs).where(and(
+    eq(slaConfigs.id, id), eq(slaConfigs.organizationId, organizationId),
+  )).returning({ id: slaConfigs.id });
 }
 
-export async function getSlaViolations(opts?: { resolved?: boolean; entityType?: string; limit?: number; offset?: number }) {
+export async function getSlaViolations(organizationId: number, opts?: { resolved?: boolean; entityType?: string; limit?: number; offset?: number }) {
   const db = await getDb();
   if (!db) return [];
-  const conditions = [];
-  if (opts?.resolved === false) conditions.push(not(eq(slaViolations.status, 'resolved')));
-  if (opts?.resolved === true) conditions.push(eq(slaViolations.status, 'resolved'));
-  if (opts?.entityType) conditions.push(eq(slaViolations.entityType, opts.entityType as any));
-  const q = db.select().from(slaViolations).orderBy(desc(slaViolations.detectedAt))
-    .limit(opts?.limit ?? 100).offset(opts?.offset ?? 0);
-  return conditions.length > 0 ? q.where(and(...conditions)) : q;
+  const conditions = [eq(slaViolations.organizationId, organizationId)];
+  if (opts?.resolved === false) conditions.push(not(eq(slaViolations.status, 'resolved')) as any);
+  if (opts?.resolved === true) conditions.push(eq(slaViolations.status, 'resolved') as any);
+  if (opts?.entityType) conditions.push(eq(slaViolations.entityType, opts.entityType as any) as any);
+  return db.select().from(slaViolations).where(and(...conditions))
+    .orderBy(desc(slaViolations.detectedAt)).limit(opts?.limit ?? 100).offset(opts?.offset ?? 0);
+}
+
+export async function getSlaViolationById(id: number, organizationId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(slaViolations).where(and(
+    eq(slaViolations.id, id), eq(slaViolations.organizationId, organizationId),
+  )).limit(1);
+  return rows[0] ?? null;
 }
 
 export async function createSlaViolation(data: Omit<InsertSlaViolation, 'id' | 'detectedAt'>) {
@@ -2172,32 +2262,42 @@ export async function createSlaViolation(data: Omit<InsertSlaViolation, 'id' | '
   await db.insert(slaViolations).values(data as InsertSlaViolation);
 }
 
-export async function resolveSlaViolation(id: number) {
+export async function resolveSlaViolation(id: number, organizationId: number) {
   const db = await getDb();
-  if (!db) return;
-  return db.update(slaViolations).set({ status: 'resolved', resolvedAt: new Date() }).where(eq(slaViolations.id, id));
+  if (!db) return [];
+  return db.update(slaViolations).set({ status: 'resolved', resolvedAt: new Date() }).where(and(
+    eq(slaViolations.id, id), eq(slaViolations.organizationId, organizationId),
+    or(eq(slaViolations.status, 'active'), eq(slaViolations.status, 'investigating')),
+  )).returning({ id: slaViolations.id });
 }
 
-export async function updateSlaViolation(id: number, data: Partial<InsertSlaViolation>) {
+export async function updateSlaViolation(id: number, data: Partial<InsertSlaViolation>, organizationId: number) {
   const db = await getDb();
-  if (!db) return;
-  if (data.status === 'resolved' && !data.resolvedAt) {
-    data.resolvedAt = new Date();
-  }
-  return db.update(slaViolations).set(data).where(eq(slaViolations.id, id));
+  if (!db) return [];
+  const { organizationId: _ignoredOrganizationId, ...safeData } = data;
+  if (safeData.status === 'resolved' && !safeData.resolvedAt) safeData.resolvedAt = new Date();
+  return db.update(slaViolations).set(safeData).where(and(
+    eq(slaViolations.id, id), eq(slaViolations.organizationId, organizationId),
+  )).returning({ id: slaViolations.id });
 }
 
 // ─── Global Quality Dimensions (agregação por métrica) ───────────────────────
-export async function getGlobalQualityDimensions() {
+export async function getGlobalQualityDimensions(organizationId?: number) {
   const db = await getDb();
   if (!db) return [];
 
-  return db.select({
+  const projection = {
     metricName: dataQualityChecks.metricName,
     avgScore: sql<number>`ROUND(AVG(${dataQualityChecks.score})::numeric, 1)`,
     totalChecks: sql<number>`COUNT(*)`,
-  })
-    .from(dataQualityChecks)
+  };
+  if (organizationId == null) {
+    return db.select(projection).from(dataQualityChecks)
+      .groupBy(dataQualityChecks.metricName).orderBy(dataQualityChecks.metricName);
+  }
+  return db.select(projection).from(dataQualityChecks)
+    .innerJoin(dataAssets, eq(dataQualityChecks.assetId, dataAssets.id))
+    .where(eq(dataAssets.organizationId, organizationId))
     .groupBy(dataQualityChecks.metricName)
     .orderBy(dataQualityChecks.metricName);
 }
@@ -2271,19 +2371,21 @@ export async function getGlobalQualityTrend(organizationId = 1, days = 30) {
 }
 
 // ─── Maturity Score (calculado dinamicamente) ─────────────────────────────────
-export async function getMaturityScore() {
+export async function getMaturityScore(organizationId: number) {
   const db = await getDb();
   if (!db) return null;
 
   const ownerAlias = alias(participants, 'maturity_owner');
   const stewardAlias = alias(participants, 'maturity_steward');
 
-  const [totalAssetsRow] = await db.select({ cnt: count() }).from(dataAssets);
+  const [totalAssetsRow] = await db.select({ cnt: count() }).from(dataAssets)
+    .where(eq(dataAssets.organizationId, organizationId));
   const totalAssets = totalAssetsRow?.cnt ?? 0;
 
   const [withDescRow] = await db.select({ cnt: count() }).from(dataAssets)
     .where(and(
       isNotNull(dataAssets.description), 
+      eq(dataAssets.organizationId, organizationId),
       sql`LENGTH(TRIM(${dataAssets.description})) > 0`,
       sql`NOT EXISTS (SELECT 1 FROM data_attributes WHERE asset_id = ${dataAssets.id} AND (description IS NULL OR LENGTH(TRIM(description)) = 0))`
     ));
@@ -2292,25 +2394,28 @@ export async function getMaturityScore() {
   const [withOwnerRow] = await db
     .select({ cnt: count() })
     .from(dataAssets)
-    .innerJoin(ownerAlias, eq(dataAssets.ownerId, ownerAlias.id));
+    .innerJoin(ownerAlias, eq(dataAssets.ownerId, ownerAlias.id))
+    .where(eq(dataAssets.organizationId, organizationId));
   const withOwner = withOwnerRow?.cnt ?? 0;
 
   const [withStewardRow] = await db
     .select({ cnt: count() })
     .from(dataAssets)
-    .innerJoin(stewardAlias, eq(dataAssets.stewardId, stewardAlias.id));
+    .innerJoin(stewardAlias, eq(dataAssets.stewardId, stewardAlias.id))
+    .where(eq(dataAssets.organizationId, organizationId));
   const withSteward = withStewardRow?.cnt ?? 0;
 
   const [highQualityRow] = await db.select({ cnt: count() }).from(dataAssets)
-    .where(gte(dataAssets.qualityScore, 70));
+    .where(and(eq(dataAssets.organizationId, organizationId), gte(dataAssets.qualityScore, 70)));
   const highQuality = highQualityRow?.cnt ?? 0;
 
-  const [totalArRow] = await db.select({ cnt: count() }).from(accessRequests);
+  const [totalArRow] = await db.select({ cnt: count() }).from(accessRequests)
+    .where(eq(accessRequests.organizationId, organizationId));
   const [resolvedArRow] = await db.select({ cnt: count() }).from(accessRequests)
-    .where(sql`status NOT IN ('pendente_owner','pendente_steward')`);
+    .where(and(eq(accessRequests.organizationId, organizationId), sql`status NOT IN ('pendente_owner','pendente_steward')`));
 
   const [glossaryApprovedRow] = await db.select({ cnt: count() }).from(businessGlossary)
-    .where(eq(businessGlossary.status, 'aprovado'));
+    .where(and(eq(businessGlossary.organizationId, organizationId), eq(businessGlossary.status, 'aprovado')));
 
   const [totalDomainsRow] = await db.select({ cnt: count() }).from(domains);
 
@@ -2342,7 +2447,7 @@ export async function getMaturityScore() {
   };
 }
 
-export async function getMaturityDrilldown() {
+export async function getMaturityDrilldown(organizationId: number) {
   const db = await getDb();
   if (!db) return null;
 
@@ -2353,6 +2458,7 @@ export async function getMaturityDrilldown() {
   const allAssets = await db
     .select({ id: dataAssets.id, name: dataAssets.name, type: dataAssets.type, qualityScore: dataAssets.qualityScore, region: dataAssets.region, sourceSystem: dataAssets.sourceSystem })
     .from(dataAssets)
+    .where(eq(dataAssets.organizationId, organizationId))
     .orderBy(dataAssets.name)
     .limit(100);
 
@@ -2360,13 +2466,13 @@ export async function getMaturityDrilldown() {
   const missingDesc = await db
     .select({ id: dataAssets.id, name: dataAssets.name, type: dataAssets.type })
     .from(dataAssets)
-    .where(
+    .where(and(eq(dataAssets.organizationId, organizationId),
       or(
         isNull(dataAssets.description), 
         sql`LENGTH(TRIM(${dataAssets.description})) = 0`,
         sql`EXISTS (SELECT 1 FROM data_attributes WHERE asset_id = ${dataAssets.id} AND (description IS NULL OR LENGTH(TRIM(description)) = 0))`
       )
-    )
+    ))
     .limit(50);
 
   // Ativos sem Data Owner
@@ -2374,7 +2480,7 @@ export async function getMaturityDrilldown() {
     .select({ id: dataAssets.id, name: dataAssets.name, type: dataAssets.type })
     .from(dataAssets)
     .leftJoin(ownerAlias, eq(dataAssets.ownerId, ownerAlias.id))
-    .where(isNull(ownerAlias.id))
+    .where(and(eq(dataAssets.organizationId, organizationId), isNull(ownerAlias.id)))
     .limit(50);
 
   // Ativos sem Steward
@@ -2382,28 +2488,28 @@ export async function getMaturityDrilldown() {
     .select({ id: dataAssets.id, name: dataAssets.name, type: dataAssets.type })
     .from(dataAssets)
     .leftJoin(stewardAlias, eq(dataAssets.stewardId, stewardAlias.id))
-    .where(isNull(stewardAlias.id))
+    .where(and(eq(dataAssets.organizationId, organizationId), isNull(stewardAlias.id)))
     .limit(50);
 
   // Ativos com baixa qualidade (< 70)
   const lowQuality = await db
     .select({ id: dataAssets.id, name: dataAssets.name, type: dataAssets.type, qualityScore: dataAssets.qualityScore })
     .from(dataAssets)
-    .where(sql`(${dataAssets.qualityScore} IS NULL OR ${dataAssets.qualityScore} < 70)`)
+    .where(and(eq(dataAssets.organizationId, organizationId), sql`(${dataAssets.qualityScore} IS NULL OR ${dataAssets.qualityScore} < 70)`))
     .limit(50);
 
   // Solicitações de acesso pendentes
   const pendingAccess = await db
     .select({ id: accessRequests.id, ticketNumber: accessRequests.ticketNumber, requesterName: accessRequests.requesterName, status: accessRequests.status, assetId: accessRequests.assetId })
     .from(accessRequests)
-    .where(sql`status IN ('pendente_owner','pendente_steward')`)
+    .where(and(eq(accessRequests.organizationId, organizationId), sql`status IN ('pendente_owner','pendente_steward')`))
     .limit(50);
 
   // Termos do glossário não aprovados
   const pendingGlossary = await db
     .select({ id: businessGlossary.id, term: businessGlossary.term, status: businessGlossary.status, category: businessGlossary.category })
     .from(businessGlossary)
-    .where(sql`status != 'aprovado'`)
+    .where(and(eq(businessGlossary.organizationId, organizationId), sql`status != 'aprovado'`))
     .limit(50);
 
   return {
@@ -2417,7 +2523,7 @@ export async function getMaturityDrilldown() {
   };
 }
 
-export async function getDomainQualityTrend() {
+export async function getDomainQualityTrend(organizationId: number) {
   const db = await getDb();
   if (!db) return [];
 
@@ -2430,6 +2536,7 @@ export async function getDomainQualityTrend() {
   })
   .from(domains)
   .leftJoin(dataAssets, eq(domains.id, dataAssets.domainId))
+  .where(or(eq(dataAssets.organizationId, organizationId), isNull(dataAssets.id)))
   .groupBy(domains.id, domains.name);
 
   return result.map(r => ({
@@ -2440,11 +2547,11 @@ export async function getDomainQualityTrend() {
 }
 
 // ─── LGPD / Dados Pessoais ────────────────────────────────────────────────────
-export async function getLgpdAssets() {
+export async function getLgpdAssets(organizationId: number) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(dataAssets)
-    .where(sql`(
+    .where(and(eq(dataAssets.organizationId, organizationId), sql`(
       sensitivity IN ('restrito','confidencial')
       OR description LIKE '%dado pessoal%'
       OR description LIKE '%dados pessoais%'
@@ -2452,7 +2559,7 @@ export async function getLgpdAssets() {
       OR description LIKE '%CPF%'
       OR name LIKE '%CPF%'
       OR name LIKE '%pessoal%'
-    )`)
+    )`))
     .orderBy(desc(dataAssets.updatedAt));
 }
 
@@ -2551,40 +2658,43 @@ export async function upsertSsoConfig(data: Omit<InsertSsoConfig, 'id' | 'create
 }
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────
-export async function getApiKeys(userId?: number) {
+export async function getApiKeys(organizationId: number, userId?: number) {
   const db = await getDb();
   if (!db) return [];
   const q = db.select({
     id: apiKeys.id, name: apiKeys.name, keyPrefix: apiKeys.keyPrefix,
+    organizationId: apiKeys.organizationId,
     scopes: apiKeys.scopes, active: apiKeys.active,
     lastUsedAt: apiKeys.lastUsedAt, expiresAt: apiKeys.expiresAt,
     createdById: apiKeys.createdById, createdAt: apiKeys.createdAt,
   }).from(apiKeys).orderBy(desc(apiKeys.createdAt));
-  return userId ? q.where(eq(apiKeys.createdById, userId)) : q;
+  const conditions = [eq(apiKeys.organizationId, organizationId)];
+  if (userId != null) conditions.push(eq(apiKeys.createdById, userId) as any);
+  return q.where(and(...conditions));
 }
 
-export async function createApiKey(name: string, scopes: string[], userId: number, expiresInDays?: number) {
+export async function createApiKey(name: string, scopes: string[], userId: number, organizationId: number, expiresInDays?: number) {
   const db = await getDb();
   if (!db) throw new Error('DB not available');
   const raw = randomBytes(32).toString('hex');
   const prefix = raw.slice(0, 8);
   const keyHash = createHash('sha256').update(raw).digest('hex');
   const expiresAt = expiresInDays ? new Date(Date.now() + expiresInDays * 86400000) : undefined;
-  await db.insert(apiKeys).values({ name, keyHash, keyPrefix: prefix, scopes: scopes as any, createdById: userId, expiresAt } as InsertApiKey);
+  await db.insert(apiKeys).values({ name, keyHash, keyPrefix: prefix, scopes: scopes as any, createdById: userId, organizationId, expiresAt } as InsertApiKey);
   return { key: `cgd_${raw}`, prefix, name, scopes }; // retorna a chave completa UMA vez
 }
 
-export async function revokeApiKey(id: number, userId: number, isAdmin: boolean) {
+export async function revokeApiKey(id: number, userId: number, organizationId: number, isAdmin: boolean) {
   const db = await getDb();
   if (!db) throw new Error('DB not available');
   if (!isAdmin) {
     // só pode revogar própria chave
-    return db.update(apiKeys).set({ active: false }).where(and(eq(apiKeys.id, id), eq(apiKeys.createdById, userId)));
+    return db.update(apiKeys).set({ active: false }).where(and(eq(apiKeys.id, id), eq(apiKeys.organizationId, organizationId), eq(apiKeys.createdById, userId)));
   }
-  return db.update(apiKeys).set({ active: false }).where(eq(apiKeys.id, id));
+  return db.update(apiKeys).set({ active: false }).where(and(eq(apiKeys.id, id), eq(apiKeys.organizationId, organizationId)));
 }
 
-export async function validateApiKey(rawKey: string): Promise<{ userId: number; scopes: string[] } | null> {
+export async function validateApiKey(rawKey: string): Promise<{ userId: number; organizationId: number; scopes: string[] } | null> {
   const db = await getDb();
   if (!db) return null;
   const stripped = rawKey.startsWith('cgd_') ? rawKey.slice(4) : rawKey;
@@ -2601,7 +2711,7 @@ export async function validateApiKey(rawKey: string): Promise<{ userId: number; 
   } else if (typeof key.scopes === 'string') {
     try { parsedScopes = JSON.parse(key.scopes); } catch {}
   }
-  return { userId: key.createdById, scopes: parsedScopes };
+  return { userId: key.createdById, organizationId: key.organizationId, scopes: parsedScopes };
 }
 
 // ─── Data Contracts ──────────────────────────────────────────────────────────
@@ -2725,16 +2835,20 @@ export async function deleteDsarRequest(id: number) {
 }
 
 // ─── Connector Configs (Marketplace) ─────────────────────────────────────────
-export async function getConnectorConfigs() {
+export async function getConnectorConfigs(organizationId?: number) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(connectorConfigs).orderBy(connectorConfigs.name);
+  if (organizationId == null) return db.select().from(connectorConfigs).orderBy(connectorConfigs.name);
+  return db.select().from(connectorConfigs).where(eq(connectorConfigs.organizationId, organizationId)).orderBy(connectorConfigs.name);
 }
 
-export async function getConnectorConfigById(id: number) {
+export async function getConnectorConfigById(id: number, organizationId?: number) {
   const db = await getDb();
   if (!db) return undefined;
-  const rows = await db.select().from(connectorConfigs).where(eq(connectorConfigs.id, id)).limit(1);
+  const condition = organizationId == null
+    ? eq(connectorConfigs.id, id)
+    : and(eq(connectorConfigs.id, id), eq(connectorConfigs.organizationId, organizationId));
+  const rows = await db.select().from(connectorConfigs).where(condition).limit(1);
   return rows[0];
 }
 
@@ -2745,27 +2859,33 @@ export async function createConnectorConfig(data: InsertConnectorConfig) {
   return inserted;
 }
 
-export async function updateConnectorConfig(id: number, data: Partial<InsertConnectorConfig>) {
+export async function updateConnectorConfig(id: number, data: Partial<InsertConnectorConfig>, organizationId?: number) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  await db.update(connectorConfigs).set({ ...data, updatedAt: new Date() }).where(eq(connectorConfigs.id, id));
-  return getConnectorConfigById(id);
+  const condition = organizationId == null
+    ? eq(connectorConfigs.id, id)
+    : and(eq(connectorConfigs.id, id), eq(connectorConfigs.organizationId, organizationId));
+  await db.update(connectorConfigs).set({ ...data, updatedAt: new Date() }).where(condition);
+  return getConnectorConfigById(id, organizationId);
 }
 
-export async function deleteConnectorConfig(id: number) {
+export async function deleteConnectorConfig(id: number, organizationId?: number) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  await db.delete(connectorConfigs).where(eq(connectorConfigs.id, id));
+  const condition = organizationId == null
+    ? eq(connectorConfigs.id, id)
+    : and(eq(connectorConfigs.id, id), eq(connectorConfigs.organizationId, organizationId));
+  await db.delete(connectorConfigs).where(condition);
   return { success: true };
 }
 
-export async function saveConnectorTestResult(id: number, success: boolean, message: string) {
+export async function saveConnectorTestResult(id: number, success: boolean, message: string, organizationId: number) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   await db.update(connectorConfigs)
     .set({ lastTestedAt: new Date(), lastTestSuccess: success, lastTestMessage: message, updatedAt: new Date() })
-    .where(eq(connectorConfigs.id, id));
-  return getConnectorConfigById(id);
+    .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organizationId, organizationId)));
+  return getConnectorConfigById(id, organizationId);
 }
 
 // ─── Workflow Engine ─────────────────────────────────────────────────────────
@@ -3080,14 +3200,17 @@ export async function deleteTagPolicy(id: number) {
   return db.delete(tagPolicies).where(eq(tagPolicies.id, id));
 }
 
-export async function getTagPolicyStats() {
+export async function getTagPolicyStats(organizationId: number) {
   const db = await getDb();
   if (!db) return { totalPolicies: 0, totalTaggedAttributes: 0, pendingSync: 0, compliancePct: 0, verifiedAttributes: 0, totalAttributes: 0 };
 
   const [polRow]   = await db.select({ c: count() }).from(tagPolicies);
-  const [totRow]   = await db.select({ c: count() }).from(dataAttributes);
-  const [taggedRow]= await db.select({ c: count() }).from(dataAttributes).where(isNotNull(dataAttributes.aiSuggestion));
-  const [verRow]   = await db.select({ c: count() }).from(dataAttributes).where(eq(dataAttributes.isVerified, true));
+  const [totRow] = await db.select({ c: count() }).from(dataAttributes)
+    .innerJoin(dataAssets, eq(dataAttributes.assetId, dataAssets.id)).where(eq(dataAssets.organizationId, organizationId));
+  const [taggedRow] = await db.select({ c: count() }).from(dataAttributes)
+    .innerJoin(dataAssets, eq(dataAttributes.assetId, dataAssets.id)).where(and(eq(dataAssets.organizationId, organizationId), isNotNull(dataAttributes.aiSuggestion)));
+  const [verRow] = await db.select({ c: count() }).from(dataAttributes)
+    .innerJoin(dataAssets, eq(dataAttributes.assetId, dataAssets.id)).where(and(eq(dataAssets.organizationId, organizationId), eq(dataAttributes.isVerified, true)));
 
   // Ativos Databricks com colunas verificadas mas nunca sincronizadas
   const pendingRows = await db
@@ -3096,6 +3219,7 @@ export async function getTagPolicyStats() {
     .innerJoin(dataAssets, eq(dataAttributes.assetId, dataAssets.id))
     .where(and(
       eq(dataAttributes.isVerified, true),
+      eq(dataAssets.organizationId, organizationId),
       eq(dataAssets.sourceSystem, 'Databricks'),
       isNull(dataAttributes.lastSyncedAt),
     ));
@@ -3114,7 +3238,7 @@ export async function getTagPolicyStats() {
 }
 
 // Conta quantos atributos mencionam cada tagKey no aiSuggestion (contagem aproximada por LIKE)
-export async function getTagAssignmentCounts(tagKeys: string[]): Promise<Record<string, number>> {
+export async function getTagAssignmentCounts(tagKeys: string[], organizationId: number): Promise<Record<string, number>> {
   const db = await getDb();
   if (!db || tagKeys.length === 0) return {};
   const result: Record<string, number> = {};
@@ -3122,7 +3246,8 @@ export async function getTagAssignmentCounts(tagKeys: string[]): Promise<Record<
     const [row] = await db
       .select({ c: count() })
       .from(dataAttributes)
-      .where(sql`aiSuggestion LIKE ${`%"${key}"%`}`);
+      .innerJoin(dataAssets, eq(dataAttributes.assetId, dataAssets.id))
+      .where(and(eq(dataAssets.organizationId, organizationId), sql`aiSuggestion LIKE ${`%"${key}"%`}`));
     result[key] = Number(row?.c ?? 0);
   }));
   return result;

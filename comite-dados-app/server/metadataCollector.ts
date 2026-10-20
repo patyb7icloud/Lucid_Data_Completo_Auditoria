@@ -1,8 +1,9 @@
 import * as db from "./db";
-import { invokeLLM } from "./_core/llm";
+import { invokeLLM, runWithLlmContext } from "./_core/llm";
 import { scanTableForPii } from "./piiScanner";
 import { cache } from "./cache";
 import { resolveDatabricksToken } from "./akvResolver";
+import { randomUUID } from "node:crypto";
 
 // Interface para os metadados coletados
 interface DiscoveredTable {
@@ -793,7 +794,7 @@ export class MetadataCollectorService {
   /**
    * IA-Powered Auto-Discovery: Classifica sensibilidade e melhora descrições
    */
-  async enrichWithAI(table: DiscoveredTable): Promise<Partial<DiscoveredTable>> {
+  async enrichWithAI(table: DiscoveredTable, organizationId: number): Promise<Partial<DiscoveredTable>> {
     console.log(`[Collector] Enriquecendo "${table.name}" com LLM...`);
     const prompt = `Analise a tabela de dados a seguir e sugira: 
     1. Uma classificação de sensibilidade (publico, interno, confidencial, restrito) baseada no nome da tabela e de suas colunas. 
@@ -806,14 +807,19 @@ export class MetadataCollectorService {
     { "sensitivity": "string", "description": "string" }`;
 
     try {
-      const response = await invokeLLM({ messages: [{ role: "user", content: prompt }] });
+      const response = await runWithLlmContext({
+        userId: null,
+        organizationId,
+        requestId: randomUUID(),
+        operation: "metadata.enrich",
+      }, () => invokeLLM({ messages: [{ role: "user", content: prompt }] }));
       const text = typeof response.choices?.[0]?.message?.content === "string"
         ? response.choices[0].message.content
         : "";
       const cleanedResponse = text.replace(/```json|```/g, "").trim();
       return JSON.parse(cleanedResponse);
     } catch (e) {
-      console.warn(`[Collector] Falha ao usar IA para ${table.name}:`, e);
+      console.warn(`[Collector] Falha ao usar IA para ${table.name}:`, e instanceof Error ? e.name : "UnknownError");
       return { sensitivity: 'interno' } as any;
     }
   }
@@ -829,6 +835,7 @@ export class MetadataCollectorService {
 
       for (const connector of connectors) {
         if (!connector.active) continue;
+        const organizationId = connector.organizationId ?? 1;
         const cfg = typeof connector.configJson === 'string' ? JSON.parse(connector.configJson) : connector.configJson;
         const type = connector.connectorType?.toLowerCase() ?? '';
 
@@ -861,113 +868,96 @@ export class MetadataCollectorService {
           lastTestedAt: new Date(),
           lastTestSuccess: result.connectorUsed === 'real',
           lastTestMessage: result.errors.length > 0 ? result.errors[0] : 'OK',
-        });
+        }, organizationId);
+        await this.persistResult(result, organizationId);
       }
 
-      // 2. Se nenhum conector ativo, usar simulação padrão
-      if (allResults.length === 0) {
-        const sapResult = await this.crawlSAPHana();
-        const sfResult = await this.crawlSnowflake();
-        allResults.push(sapResult, sfResult);
-      }
-
-      const allTables = allResults.flatMap(r => r.tables);
-      const allLineageEdges = allResults.flatMap(r => r.lineageEdges || []);
-      console.log(`[Collector] ${allTables.length} ativos descobertos, ${allLineageEdges.length} arestas de linhagem. Sincronizando...`);
-
-
-      for (const table of allTables) {
-        const aiEnrichment = await this.enrichWithAI(table);
-        const sensitivity = ((aiEnrichment as any).sensitivity as string) || 'interno';
-        const description = aiEnrichment.description || table.description;
-
-        const existingAssets = await db.getDataAssets();
-        const asset = existingAssets.find(a => a.name === table.name);
-        let assetId: number;
-
-        if (!asset) {
-          // Para Databricks, monta fullyQualifiedName = catalog.schema.table
-          // Sanitiza catalog: remove tudo após o ponto (ex: "psw_bricks_2.schema" → "psw_bricks_2")
-          const rawDatabricksCatalog = table.catalog || process.env.DATABRICKS_CATALOG || '';
-          const effectiveDatabricksCatalog = rawDatabricksCatalog.includes('.')
-            ? rawDatabricksCatalog.split('.')[0]
-            : rawDatabricksCatalog;
-          const fqn = table.source === 'Databricks' && effectiveDatabricksCatalog
-            ? `${effectiveDatabricksCatalog}.${table.name}`
-            : undefined;
-          const result = await db.createDataAsset({
-            name: table.name, sourceSystem: table.source,
-            description, type: table.type, status: 'ativo', sensitivity: sensitivity as "publico" | "interno" | "confidencial" | "restrito" | null | undefined,
-            ...(fqn ? { fullyQualifiedName: fqn } : {}),
-          });
-          assetId = (result as any)?.id;
-          console.log(`[Collector] Novo ativo (IA: ${sensitivity}): ${table.name}`);
-
-          await db.createAuditLog({
-            action: "create", entity: "data_asset", entityId: assetId,
-            details: {
-              source: "IA_AutoDiscovery",
-              aiSugeriu: { sensitivity, description },
-              justificativaLabel: "Classificação automática via LLM (Privacy-Safe Metadata Analysis).",
-            }
-          });
-        } else {
-          assetId = asset.id;
-          // Atualiza FQN mesmo em ativos existentes (garante que mudar o catalog corrija o FQN)
-          const rawDatabricksCatalogUpd = table.catalog || process.env.DATABRICKS_CATALOG || '';
-          const effectiveDatabricksCatalogUpd = rawDatabricksCatalogUpd.includes('.')
-            ? rawDatabricksCatalogUpd.split('.')[0]
-            : rawDatabricksCatalogUpd;
-          const fqnUpd = table.source === 'Databricks' && effectiveDatabricksCatalogUpd
-            ? `${effectiveDatabricksCatalogUpd}.${table.name}`
-            : undefined;
-          await db.updateDataAsset(assetId, {
-            updatedAt: new Date(),
-            ...(fqnUpd ? { fullyQualifiedName: fqnUpd } : {}),
-          });
-        }
-
-        // 4. Sincronizar atributos com detecção automática de PII
-        const existingAttrs = await db.getDataAttributes(assetId);
-        for (const col of table.columns) {
-          const attrExists = existingAttrs.find(a => a.name === col.name);
-          const piiResult = scanTableForPii(col.name, col.type);
-
-          if (!attrExists) {
-            await db.createDataAttribute({
-              assetId, name: col.name, dataType: col.type,
-              description: col.description,
-              isPii: piiResult.isPii,
-            } as any);
-          } else {
-            const attrUpdates: Record<string, any> = {};
-            // Preenche description vazia com o comentário recém-coletado do catálogo
-            if (!attrExists.description && col.description) attrUpdates.description = col.description;
-            // Atualiza tipo se foi refinado pelo catálogo
-            if (col.type && col.type !== attrExists.dataType) attrUpdates.dataType = col.type;
-            if (piiResult.isPii && !attrExists.isPii) attrUpdates.isPii = true;
-            if (Object.keys(attrUpdates).length > 0) {
-              await db.updateDataAttribute(attrExists.id, attrUpdates as any);
-            }
-          }
-        }
-      }
-
-      // Importar linhagens coletadas (resolve FQN/Name)
-      if (allLineageEdges.length > 0) {
-        try {
-          const res = await db.importLineageEdges(allLineageEdges);
-          console.log(`[Collector] Linhagem importada: ${res.imported} novas arestas (${res.skipped} ignoradas)`);
-        } catch (err: any) {
-          console.error(`[Collector] Erro ao importar linhagem automática: ${err.message}`);
-        }
-      }
+      const totalTables = allResults.reduce((sum, result) => sum + result.tables.length, 0);
+      console.log(`[Collector] ${totalTables} ativos descobertos em ${allResults.length} conectores tenant-scoped.`);
 
       await cache.flush("assets:"); // Invalida o cache para os ativos aparecerem imediatamente no catálogo
-      return { success: true, count: allTables.length, connectorsUsed: allResults.map(r => r.connectorUsed) };
+      return { success: true, count: totalTables, connectorsUsed: allResults.map(r => r.connectorUsed) };
     } catch (error) {
       console.error("[Collector] Erro na sincronização:", error);
       throw error;
+    }
+  }
+
+  async persistResult(result: ConnectorResult, organizationId: number): Promise<void> {
+    for (const table of result.tables) {
+      const aiEnrichment = await this.enrichWithAI(table, organizationId);
+      const sensitivity = ((aiEnrichment as any).sensitivity as string) || "interno";
+      const description = aiEnrichment.description || table.description;
+      const existingAssets = await db.getDataAssets({ organizationId });
+      const asset = existingAssets.find(item => item.name === table.name && item.sourceSystem === table.source);
+      let assetId: number;
+
+      const rawCatalog = table.catalog || process.env.DATABRICKS_CATALOG || "";
+      const effectiveCatalog = rawCatalog.includes(".") ? rawCatalog.split(".")[0] : rawCatalog;
+      const fullyQualifiedName = table.source === "Databricks" && effectiveCatalog
+        ? `${effectiveCatalog}.${table.name}`
+        : undefined;
+
+      if (!asset) {
+        const inserted = await db.createDataAsset({
+          organizationId,
+          name: table.name,
+          sourceSystem: table.source,
+          description,
+          type: table.type,
+          status: "ativo",
+          sensitivity: sensitivity as "publico" | "interno" | "confidencial" | "restrito",
+          ...(fullyQualifiedName ? { fullyQualifiedName } : {}),
+        });
+        assetId = inserted.id;
+        await db.createAuditLog({
+          organizationId,
+          action: "create",
+          entity: "data_asset",
+          entityId: assetId,
+          details: {
+            source: "IA_AutoDiscovery",
+            aiSugeriu: { sensitivity, description },
+            justificativaLabel: "Classificação automática via LLM (Privacy-Safe Metadata Analysis).",
+          },
+        });
+      } else {
+        assetId = asset.id;
+        await db.updateDataAsset(assetId, {
+          updatedAt: new Date(),
+          ...(fullyQualifiedName ? { fullyQualifiedName } : {}),
+        }, organizationId);
+      }
+
+      const existingAttrs = await db.getDataAttributes(assetId, organizationId);
+      for (const column of table.columns) {
+        const attrExists = existingAttrs.find(item => item.name === column.name);
+        const piiResult = scanTableForPii(column.name, column.type);
+        if (!attrExists) {
+          await db.createDataAttribute({
+            assetId,
+            name: column.name,
+            dataType: column.type,
+            description: column.description,
+            isPii: piiResult.isPii,
+          } as any);
+          continue;
+        }
+        const updates: Record<string, unknown> = {};
+        if (!attrExists.description && column.description) updates.description = column.description;
+        if (column.type && column.type !== attrExists.dataType) updates.dataType = column.type;
+        if (piiResult.isPii && !attrExists.isPii) updates.isPii = true;
+        if (Object.keys(updates).length) await db.updateDataAttribute(attrExists.id, updates as any, organizationId);
+      }
+    }
+
+    if (result.lineageEdges?.length) {
+      try {
+        const imported = await db.importLineageEdges(result.lineageEdges, organizationId);
+        console.log(`[Collector] Linhagem tenant=${organizationId}: ${imported.imported} novas arestas (${imported.skipped} ignoradas)`);
+      } catch (error) {
+        console.error("[Collector] Falha ao importar linhagem:", error instanceof Error ? error.name : "UnknownError");
+      }
     }
   }
 
@@ -976,26 +966,34 @@ export class MetadataCollectorService {
    */
   async processApprovedServiceNowTickets() {
     console.log("[Collector] Verificando tickets aprovados no ServiceNow...");
-    const tickets = await db.getServicenowTickets();
-    
-    // Filtra tickets que são novos datasets e estão concluídos
-    const approvedDatasets = tickets.filter(t => 
-      t.status === 'concluído' && 
-      (t.title.toLowerCase().includes('novo dataset') || t.title.toLowerCase().includes('acesso'))
-    );
-
-    for (const ticket of approvedDatasets) {
-      const existingAssets = await db.getDataAssets();
-      if (!existingAssets.find(a => a.name === ticket.ticketNumber)) {
-        await db.createDataAsset({
-          name: `SN_${ticket.ticketNumber}`,
+    const organizationIds = await db.getOrganizationIds();
+    for (const organizationId of organizationIds) {
+      const tickets = await db.getServicenowTickets(undefined, organizationId);
+      const approvedDatasets = tickets.filter(ticket =>
+        ticket.status === "concluído" &&
+        (ticket.title.toLowerCase().includes("novo dataset") || ticket.title.toLowerCase().includes("acesso")),
+      );
+      const existingAssets = await db.getDataAssets({ organizationId });
+      for (const ticket of approvedDatasets) {
+        const name = `SN_${ticket.ticketNumber}`;
+        if (existingAssets.some(asset => asset.name === name && asset.sourceSystem === "ServiceNow Provisioning")) continue;
+        const asset = await db.createDataAsset({
+          organizationId,
+          name,
           description: `Ativo originado do Ticket ServiceNow: ${ticket.title}. ${ticket.description}`,
           sourceSystem: "ServiceNow Provisioning",
           type: "tabela",
           status: "ativo",
-          sensitivity: "interno"
+          sensitivity: "interno",
         });
-        console.log(`[Collector] Ativo criado via ServiceNow: ${ticket.ticketNumber}`);
+        await db.createAuditLog({
+          organizationId,
+          action: "create",
+          entity: "data_asset",
+          entityId: asset.id,
+          details: { source: "ServiceNowProvisioning", ticketId: ticket.id },
+        });
+        console.log(`[Collector] Ativo ServiceNow criado no tenant ${organizationId}: ${ticket.ticketNumber}`);
       }
     }
     await cache.flush("assets:"); // Invalida o cache para os ativos aparecerem imediatamente no catálogo

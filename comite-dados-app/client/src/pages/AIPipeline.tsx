@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { getRequiredChecklist, type GateChecklistItem } from "@shared/aiProjectGates";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,8 +17,8 @@ const GATES = [
   { id: "G0", title: "Intake / Ideação", color: "bg-blue-50 border-blue-200" },
   { id: "G1", title: "Desenvolvimento", color: "bg-purple-50 border-purple-200" },
   { id: "G2", title: "Produção (Deploy)", color: "bg-orange-50 border-orange-200" },
-  { id: "G3", title: "Monitoramento", color: "bg-green-50 border-green-200" }
-];
+  { id: "G3", title: "Monitoramento", color: "bg-green-50 border-green-200" },
+] as const;
 
 export default function AIPipeline() {
   const { data: projects = [], isLoading } = trpc.aiPipeline.list.useQuery();
@@ -30,14 +31,14 @@ export default function AIPipeline() {
     servicenowTicket: string, azureDevopsUrl: string, termsAccepted: boolean, projectType: string
   }>({ name: "", description: "", department: "", riskLevel: "medio", servicenowTicket: "", azureDevopsUrl: "", termsAccepted: false, projectType: "IA" });
   
-  const [transitionDialog, setTransitionDialog] = useState<{open: boolean, projectId: number, nextGate: string, gateTitle: string, checklists: string[]}>({open: false, projectId: 0, nextGate: "", gateTitle: "", checklists: []});
+  const [transitionDialog, setTransitionDialog] = useState<{open: boolean, projectId: number, nextGate: string, gateTitle: string, checklists: GateChecklistItem[]}>({open: false, projectId: 0, nextGate: "", gateTitle: "", checklists: []});
   const [checklistValues, setChecklistValues] = useState<{[key: number]: boolean}>({});
   const [evidenceValues, setEvidenceValues] = useState<{[key: number]: string}>({});
 
   const createProject = trpc.aiPipeline.create.useMutation();
   const updateGate = trpc.aiPipeline.updateGate.useMutation();
   const updateGoNoGo = trpc.aiPipeline.updateGoNoGo.useMutation();
-  const submitChecklist = trpc.aiPipeline.submitChecklist.useMutation();
+  const syncExternal = trpc.aiPipeline.syncExternal.useMutation();
   const utils = trpc.useUtils();
 
   const handleCreate = async () => {
@@ -66,38 +67,8 @@ export default function AIPipeline() {
     
     const nextGate = GATES[nextIndex];
 
-    if (direction === "next" && project.gate === "G0" && project.goNoGoStatus !== "go") {
-      return toast.error("O Business Case deve ser aprovado (GO) antes de mover para Desenvolvimento.");
-    }
-
-    if (direction === "next" && (project.gate === "G0" || project.gate === "G1" || project.gate === "G2")) {
-      let checklists: string[] = [];
-      
-      if (project.gate === "G0") {
-        checklists = [
-          "Validação de Fornecedor / Third-party Risk",
-          "Classificação da Confidencialidade dos dados"
-        ];
-      } else if (project.gate === "G1") {
-        if (project.projectType === "Engenharia de Dados") {
-          checklists = ["Dicionário de Dados aprovado", "Linhagem Documentada", "Pipeline de Ingestão Validado"];
-        } else if (project.projectType === "Business Intelligence (BI)") {
-          checklists = ["Homologação de Métricas com o Negócio", "Layout UX/UI Validado", "Performance do Painel testada"];
-        } else if (project.projectType === "Automação / RPA" || project.projectType === "App / Software") {
-          checklists = ["Testes Unitários Concluídos", "Análise de Vulnerabilidades (SAST/DAST)"];
-        } else {
-          checklists = ["Arquitetura validada no Azure", "Risco de IA Reavaliado", "MVP aprovado pelos stakeholders", "Testes de Segurança de LLM (Jailbreak / Red Teaming)", "Avaliação de Viés (Fairness) aprovada"];
-        }
-      } else if (project.gate === "G2") {
-        if (project.projectType === "Engenharia de Dados") {
-          checklists = ["Monitoramento de Qualidade de Dados ativo", "Políticas de Acesso de Dados aplicadas no Lake/DW"];
-        } else if (project.projectType === "Business Intelligence (BI)") {
-          checklists = ["Carga de dados agendada no Scheduler", "Acesso liberado para grupo de usuários finais"];
-        } else {
-          checklists = ["Testes de Carga / Stress concluídos", "Políticas de Segurança e LGPD aplicadas no pipeline CI/CD", "Ferramentas de Observabilidade Ativas", "Definição de SLA e Matriz de Escalonamento", "Mecanismo de Kill-switch documentado"];
-        }
-      }
-      
+    if (direction === "next") {
+      const checklists = getRequiredChecklist(project.projectType || "IA", nextGate.id as any);
       setChecklistValues({});
       setEvidenceValues({});
       setTransitionDialog({
@@ -109,23 +80,17 @@ export default function AIPipeline() {
       });
       return;
     }
-
-    executeMove(project.id, nextGate.id, []);
+    const reason = window.prompt("Justificativa obrigatória para retornar o projeto ao gate anterior (mínimo 10 caracteres):");
+    if (!reason || reason.trim().length < 10) return toast.error("O rollback exige uma justificativa de pelo menos 10 caracteres.");
+    executeMove(project.id, nextGate.id, [], reason.trim());
   };
 
-  const executeMove = async (id: number, gate: string, checkedItems: {itemText: string, evidenceLink?: string}[] = []) => {
+  const executeMove = async (id: number, gate: string, checkedItems: {itemKey: string, evidenceLink: string}[] = [], reason?: string) => {
     try {
-      if (checkedItems.length > 0) {
-        await submitChecklist.mutateAsync({
-          projectId: id,
-          gate: gate as any,
-          items: checkedItems
-        });
-      }
-      
-      await updateGate.mutateAsync({ id, gate: gate as any });
+      await updateGate.mutateAsync({ id, gate: gate as any, items: checkedItems, reason });
       toast.success(`Projeto movido para ${gate}`);
       utils.aiPipeline.list.invalidate();
+      utils.aiPipeline.metrics.invalidate();
       setTransitionDialog({ open: false, projectId: 0, nextGate: "", gateTitle: "", checklists: [] });
     } catch(err: any) {
       toast.error(err.message || "Erro ao mover card");
@@ -133,13 +98,25 @@ export default function AIPipeline() {
   };
 
   const handleGoNoGo = async (id: number, status: "go" | "no_go") => {
+    const reason = window.prompt(`Justificativa obrigatória para ${status.toUpperCase()} (mínimo 10 caracteres):`);
+    if (!reason || reason.trim().length < 10) return toast.error("A decisão exige uma justificativa de pelo menos 10 caracteres.");
     try {
-      await updateGoNoGo.mutateAsync({ id, status });
+      await updateGoNoGo.mutateAsync({ id, status, reason: reason.trim() });
       toast.success(`Business Case avaliado como ${status.toUpperCase()}`);
       utils.aiPipeline.list.invalidate();
       utils.aiPipeline.metrics.invalidate();
     } catch(err: any) {
       toast.error(err.message);
+    }
+  };
+
+  const handleSyncExternal = async (id: number) => {
+    try {
+      const result = await syncExternal.mutateAsync({ id });
+      toast.success(result.message);
+      utils.aiPipeline.syncStatus.invalidate({ id });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível enfileirar a sincronização.");
     }
   };
 
@@ -207,6 +184,10 @@ export default function AIPipeline() {
                         )}
                       </div>
                     )}
+
+                    <Button size="sm" variant="outline" className="w-full text-xs" disabled={syncExternal.isPending} onClick={() => handleSyncExternal(project.id)}>
+                      Sincronizar com ServiceNow / Azure DevOps
+                    </Button>
                     
                     {gate.id === "G0" && (
                       <div className="pt-2 border-t flex flex-col gap-2">
@@ -343,7 +324,7 @@ export default function AIPipeline() {
             </DialogDescription>
           </DialogHeader>
           <div className="py-4 space-y-4 max-h-[60vh] overflow-y-auto pr-2">
-            {transitionDialog.checklists.map((check, idx) => (
+                    {transitionDialog.checklists.map((check, idx) => (
               <div key={idx} className={`flex flex-col space-y-2 border p-3 rounded transition-colors ${checklistValues[idx] ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
                 <div className="flex items-start space-x-2">
                   <Checkbox 
@@ -353,13 +334,13 @@ export default function AIPipeline() {
                     className="data-[state=checked]:bg-green-600 data-[state=checked]:border-green-600 data-[state=checked]:text-white h-5 w-5 mt-0.5"
                   />
                   <label htmlFor={`chk-${idx}`} className={`text-sm font-medium leading-tight cursor-pointer ${checklistValues[idx] ? 'text-green-800' : 'text-gray-700'}`}>
-                    {check}
+                    {check.label}
                   </label>
                 </div>
                 {checklistValues[idx] && (
                   <div className="pl-7 pt-1">
                     <Input 
-                      placeholder="Link da Evidência (ex: URL SharePoint, Relatório Azure, Ticket SNOW...)" 
+                      placeholder="Link HTTPS obrigatório da evidência (SharePoint, Azure, Ticket SNOW...)"
                       value={evidenceValues[idx] || ""}
                       onChange={e => setEvidenceValues(prev => ({...prev, [idx]: e.target.value}))}
                       className="bg-white text-xs h-8 border-green-200 focus-visible:ring-green-500"
@@ -372,11 +353,14 @@ export default function AIPipeline() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setTransitionDialog(prev => ({...prev, open: false}))}>Cancelar</Button>
             <Button 
-              disabled={transitionDialog.checklists.some((_, idx) => !checklistValues[idx])} 
+              disabled={transitionDialog.checklists.some((_, idx) => {
+                if (!checklistValues[idx]) return true;
+                try { return new URL(evidenceValues[idx] || "").protocol !== "https:"; } catch { return true; }
+              })}
               onClick={() => executeMove(
                 transitionDialog.projectId, 
                 transitionDialog.nextGate, 
-                transitionDialog.checklists.map((c, i) => ({ itemText: c, evidenceLink: evidenceValues[i] }))
+                transitionDialog.checklists.map((c, i) => ({ itemKey: c.key, evidenceLink: evidenceValues[i] || "" }))
               )}
               className="bg-green-600 hover:bg-green-700"
             >

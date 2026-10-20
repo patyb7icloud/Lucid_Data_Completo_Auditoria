@@ -2,7 +2,7 @@
  * MLOps.tsx
  * Lacuna 1: Módulo MLOps/LLMOps — Registro, Monitoramento e Ciclo de Vida de Modelos
  */
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -60,6 +60,11 @@ const TYPE_LABELS: Record<string, string> = {
   classification: "Classificação", regression: "Regressão", nlp: "NLP",
   llm: "LLM", computer_vision: "Visão Computacional", clustering: "Clustering", other: "Outro",
 };
+
+const formatCount = (value: number | null | undefined) =>
+  value == null ? "—" : Math.round(value).toLocaleString("pt-BR");
+const formatUsd = (value: number | null | undefined) =>
+  value == null ? "Indisponível" : `US$ ${value.toFixed(2)}`;
 
 const FRAMEWORK_LABELS: Record<string, string> = {
   sklearn: "Scikit-learn", pytorch: "PyTorch", tensorflow: "TensorFlow",
@@ -248,7 +253,7 @@ function PipelineDialog({ open, onClose, model, targetStatus, onConfirm }: any) 
 export default function MLOps() {
   const [tab, setTab] = useState("dashboard");
   const [showCreate, setShowCreate] = useState(false);
-  const [finopsPeriod, setFinopsPeriod] = useState("monthly");
+  const [finopsPeriod, setFinopsPeriod] = useState<"weekly" | "monthly" | "yearly">("monthly");
   
   // Controle da Pipeline Dialog
   const [pipelineState, setPipelineState] = useState<{ open: boolean, model: any, targetStatus: string }>({ open: false, model: null, targetStatus: "" });
@@ -263,13 +268,15 @@ export default function MLOps() {
   const { data: models = [], refetch: refetchModels } = trpc.mlops.models.list.useQuery();
 
   // Queries de FinOps
-  const { data: finopsSummary } = trpc.mlops.finops.summary.useQuery();
-  const { data: finopsByAgent } = trpc.mlops.finops.byAgent.useQuery();
-  const { data: finopsByUser } = trpc.mlops.finops.byUser.useQuery();
-  const { data: finopsAnomalies } = trpc.mlops.finops.anomalies.useQuery();
+  const finopsInput = { period: finopsPeriod };
+  const { data: finopsSummary } = trpc.mlops.finops.summary.useQuery(finopsInput);
+  const { data: finopsByAgent } = trpc.mlops.finops.byAgent.useQuery(finopsInput);
+  const { data: finopsByUser } = trpc.mlops.finops.byUser.useQuery(finopsInput);
+  const { data: finopsAnomalies } = trpc.mlops.finops.anomalies.useQuery(finopsInput);
 
-  // Multiplicador simulado para refletir o período selecionado no Frontend (já que o backend mock retorna mês)
-  const periodMultiplier = finopsPeriod === "weekly" ? 0.25 : finopsPeriod === "yearly" ? 12 : 1;
+  const finopsAgentChart = (finopsByAgent ?? [])
+    .filter(agent => agent.estimatedCostUSD != null)
+    .map(agent => ({ ...agent, costUSD: agent.estimatedCostUSD as number }));
 
   const createModel = trpc.mlops.models.create.useMutation({
     onSuccess: () => {
@@ -298,9 +305,9 @@ export default function MLOps() {
 
   const metricsChartData = models.slice(0, 8).map(m => ({
     name: m.name.length > 12 ? m.name.slice(0, 12) + "…" : m.name,
-    accuracy: m.accuracyScore ? Math.round((m.accuracyScore as number) * 100) : 0,
-    f1: m.f1Score ? Math.round((m.f1Score as number) * 100) : 0,
-    drift: m.driftScore ? Math.round((m.driftScore as number) * 100) : 0,
+    accuracy: m.accuracyScore == null ? null : Math.round((m.accuracyScore as number) * 100),
+    f1: m.f1Score == null ? null : Math.round((m.f1Score as number) * 100),
+    drift: m.driftScore == null ? null : Math.round((m.driftScore as number) * 100),
   }));
 
   function handleCreate() {
@@ -623,7 +630,7 @@ export default function MLOps() {
                 <p className="text-sm text-slate-500">Monitoramento de custos operacionais e gasto de tokens LLM.</p>
               </div>
               <div className="flex items-center gap-3 bg-white p-1 rounded-lg border shadow-sm">
-                <Select value={finopsPeriod} onValueChange={setFinopsPeriod}>
+                <Select value={finopsPeriod} onValueChange={value => setFinopsPeriod(value as "weekly" | "monthly" | "yearly")}>
                   <SelectTrigger className="w-[180px] border-none shadow-none focus:ring-0">
                     <SelectValue />
                   </SelectTrigger>
@@ -636,7 +643,7 @@ export default function MLOps() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               <Card className="border-emerald-200 bg-emerald-50/30">
                 <CardHeader className="py-4">
                   <CardTitle className="text-sm font-medium text-emerald-800 flex items-center justify-between">
@@ -644,31 +651,41 @@ export default function MLOps() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-emerald-700">US$ {((finopsSummary?.estimatedCostUSD ?? 0) * periodMultiplier).toFixed(2)}</div>
-                  <p className="text-xs text-emerald-600/80 mt-1">
-                    {finopsPeriod === 'weekly' ? 'Projeção semanal' : finopsPeriod === 'yearly' ? 'Acumulado no ano' : 'Estimado no mês atual'}
-                  </p>
+                  <div className="text-2xl font-bold text-emerald-700">{formatUsd(finopsSummary?.estimatedCostUSD)}</div>
+                  <p className="text-xs text-emerald-600/80 mt-1">Estimativa do catálogo; não é faturamento.</p>
                 </CardContent>
               </Card>
               <Card className="border-blue-200 bg-blue-50/30">
                 <CardHeader className="py-4">
                   <CardTitle className="text-sm font-medium text-blue-800 flex items-center justify-between">
-                    Total de Tokens <Coins className="w-4 h-4 text-blue-600" />
+                    Tokens reportados <Coins className="w-4 h-4 text-blue-600" />
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-blue-700">{Math.round((finopsSummary?.totalTokens ?? 0) * periodMultiplier).toLocaleString('pt-BR')}</div>
-                  <p className="text-xs text-blue-600/80 mt-1">Prompt + Completion</p>
+                  <div className="text-2xl font-bold text-blue-700">{formatCount(finopsSummary?.totalTokens)}</div>
+                  <p className="text-xs text-blue-600/80 mt-1">Prompt + completion do provider</p>
+                  {(finopsSummary?.unknownTokenRequests ?? 0) > 0 && <p className="text-xs text-amber-700 mt-1">{finopsSummary?.unknownTokenRequests} sem usage</p>}
+                </CardContent>
+              </Card>
+              <Card className="border-slate-200">
+                <CardHeader className="py-4">
+                  <CardTitle className="text-sm font-medium text-slate-500 flex items-center justify-between">
+                    Custo faturado <DollarSign className="w-4 h-4 text-slate-400" />
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-slate-700">{formatUsd(finopsSummary?.billedCostUSD)}</div>
+                  <p className="text-xs text-slate-500 mt-1">Disponível após importação de billing.</p>
                 </CardContent>
               </Card>
               <Card>
                 <CardHeader className="py-4">
                   <CardTitle className="text-sm font-medium text-slate-500 flex items-center justify-between">
-                    Agentes Ativos <BrainCircuit className="w-4 h-4 text-slate-400" />
+                    Operações ativas <BrainCircuit className="w-4 h-4 text-slate-400" />
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-slate-700">{finopsSummary?.activeAgents}</div>
+                  <div className="text-2xl font-bold text-slate-700">{finopsSummary?.activeOperations ?? 0}</div>
                 </CardContent>
               </Card>
               <Card>
@@ -678,7 +695,8 @@ export default function MLOps() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-slate-700">{Math.round((finopsSummary?.totalRequests ?? 0) * periodMultiplier).toLocaleString('pt-BR')}</div>
+                  <div className="text-2xl font-bold text-slate-700">{formatCount(finopsSummary?.totalRequests)}</div>
+                  <p className="text-xs text-slate-500 mt-1">{finopsSummary?.successfulRequests ?? 0} sucesso / {finopsSummary?.failedRequests ?? 0} falha</p>
                 </CardContent>
               </Card>
             </div>
@@ -687,19 +705,23 @@ export default function MLOps() {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-sm font-semibold flex items-center gap-2 text-slate-700">
-                    <BarChart3 className="w-4 h-4 text-slate-500" /> Custo por Agente de IA (US$)
+                    <BarChart3 className="w-4 h-4 text-slate-500" /> Custo por operação LLM (US$)
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="h-[250px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={finopsByAgent?.map(a => ({ ...a, costUSD: a.costUSD * periodMultiplier }))} layout="vertical" margin={{ left: 30 }}>
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} opacity={0.3} />
-                      <XAxis type="number" />
-                      <YAxis dataKey="name" type="category" tick={{ fontSize: 11 }} width={100} />
-                      <Tooltip formatter={(val: number) => `US$ ${val.toFixed(2)}`} />
-                      <Bar dataKey="costUSD" fill="#10b981" radius={[0, 4, 4, 0]} barSize={20} />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  {finopsAgentChart.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-sm text-slate-400">Sem estimativas de custo disponíveis para o período.</div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={finopsAgentChart} layout="vertical" margin={{ left: 30 }}>
+                        <CartesianGrid strokeDasharray="3 3" horizontal={false} opacity={0.3} />
+                        <XAxis type="number" />
+                        <YAxis dataKey="name" type="category" tick={{ fontSize: 11 }} width={100} />
+                        <Tooltip formatter={(val: number) => `US$ ${val.toFixed(2)}`} />
+                        <Bar dataKey="costUSD" fill="#10b981" radius={[0, 4, 4, 0]} barSize={20} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
                 </CardContent>
               </Card>
 
@@ -716,7 +738,7 @@ export default function MLOps() {
                         <th className="text-left px-4 py-2 font-medium">Usuário</th>
                         <th className="text-left px-4 py-2 font-medium">Departamento</th>
                         <th className="text-right px-4 py-2 font-medium">Tokens</th>
-                        <th className="text-right px-4 py-2 font-medium">Custo (US$)</th>
+                        <th className="text-right px-4 py-2 font-medium">Estimado</th><th className="text-right px-4 py-2 font-medium">Faturado</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -724,8 +746,9 @@ export default function MLOps() {
                         <tr key={u.id} className="border-b last:border-0 hover:bg-slate-50 transition-colors">
                           <td className="px-4 py-3 font-medium text-slate-700">{u.name}</td>
                           <td className="px-4 py-3 text-slate-500">{u.department}</td>
-                          <td className="px-4 py-3 text-right font-mono text-xs text-slate-600">{Math.round(u.tokens * periodMultiplier).toLocaleString('pt-BR')}</td>
-                          <td className="px-4 py-3 text-right font-mono text-emerald-600 font-medium">${(u.costUSD * periodMultiplier).toFixed(2)}</td>
+                          <td className="px-4 py-3 text-right font-mono text-xs text-slate-600">{formatCount(u.tokens)}</td>
+                          <td className="px-4 py-3 text-right font-mono text-emerald-600 font-medium">{formatUsd(u.estimatedCostUSD)}</td>
+                          <td className="px-4 py-3 text-right font-mono text-slate-500">{formatUsd(u.billedCostUSD)}</td>
                         </tr>
                       ))}
                     </tbody>

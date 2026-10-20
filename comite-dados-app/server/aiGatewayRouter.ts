@@ -1,7 +1,19 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
-import { mlPredictionLogs } from "../drizzle/schema";
+import { invokeLLM } from "./_core/llm";
+
+const blockedPrompt = (prompt: string): boolean => {
+  const normalizedPrompt = prompt.normalize("NFKC").toLocaleLowerCase();
+  return /ignore\s+(?:as|todas\s+as)\s+instruções|revel(?:e|ar)\s+(?:o|as)\s+instruções|\bcpf\b|número\s+de\s+documento/.test(normalizedPrompt);
+};
+
+const responseText = (content: string | Array<{ type: string; text?: string }>): string => {
+  if (typeof content === "string") return content;
+  return content
+    .filter(part => part.type === "text" && typeof part.text === "string")
+    .map(part => part.text)
+    .join("\n");
+};
 
 export const aiGatewayRouter = router({
   chat: protectedProcedure
@@ -9,51 +21,30 @@ export const aiGatewayRouter = router({
       agentId: z.number().optional(), // In a real app this maps to a specific Databricks Endpoint
       prompt: z.string().min(1),
     }))
-    .mutation(async ({ input, ctx }) => {
-      const db = await getDb();
-      if (!db) throw new Error("Database unavailable");
-
-      // 1. Autenticação/Identidade
-      // Neste mock, usamos ctx.user.id (simulando a identidade do Entra ID propagada)
-      const userId = ctx.user.id;
-      const userName = ctx.user.name ?? "Usuário Desconhecido";
-
-      // 2. Guardrails Interceptivos (Simulados)
-      const normalizedPrompt = input.prompt.toLowerCase();
-      if (normalizedPrompt.includes("ignore as instruções") || normalizedPrompt.includes("cpf")) {
-        throw new Error("GUARDRAIL BLOCK: Prompt contem violação de segurança (PII ou Injeção). Requisição bloqueada antes de chegar ao LLM.");
+    .mutation(async ({ input }) => {
+      if (blockedPrompt(input.prompt)) {
+        return {
+          blocked: true,
+          reply: "Sua solicitação foi bloqueada pelos controles de segurança.",
+          telemetry: { promptTokens: null, completionTokens: null, totalTokens: null, costUsd: null },
+        };
       }
 
-      // 3. Roteamento de LLM (Mock de chamada ao Databricks Model Serving)
-      // Aqui o backend usaria o Token do Azure Key Vault (AKV) para chamar a API
-      await new Promise(resolve => setTimeout(resolve, 800)); // Simulando latência da rede
-
-      const responseText = `Olá ${userName}, esta é uma resposta simulada do Agente ${input.agentId ?? "Global"}. Recebi o seu prompt: "${input.prompt}".`;
-
-      // 4. Cálculo de FinOps (Tokens)
-      // Simulando a contagem de tokens que a API real devolveria
-      const promptTokens = Math.max(10, input.prompt.length / 4);
-      const completionTokens = Math.max(20, responseText.length / 4);
-      const totalCostUsd = (promptTokens * 0.00001) + (completionTokens * 0.00003); // Preço fictício
-
-      // 5. Registro de FinOps e Telemetria no Banco
-      await db.insert(mlPredictionLogs).values({
-        modelId: input.agentId ?? 999,
-        userId: userId,
-        outputLabel: responseText, // Gravando a resposta gerada
-        promptTokens: Math.round(promptTokens),
-        completionTokens: Math.round(completionTokens),
-        costUsd: totalCostUsd,
-        flagged: false,
+      const result = await invokeLLM({
+        messages: [{ role: "user", content: input.prompt }],
       });
+      const content = result.choices?.[0]?.message?.content ?? "";
 
       return {
-        reply: responseText,
+        blocked: false,
+        reply: responseText(content),
+        ...(result.usage ? { usage: result.usage } : {}),
         telemetry: {
-          promptTokens: Math.round(promptTokens),
-          completionTokens: Math.round(completionTokens),
-          costUsd: totalCostUsd.toFixed(6)
-        }
+          promptTokens: result.usage?.prompt_tokens ?? null,
+          completionTokens: result.usage?.completion_tokens ?? null,
+          totalTokens: result.usage?.total_tokens ?? null,
+          costUsd: null,
+        },
       };
     }),
 });

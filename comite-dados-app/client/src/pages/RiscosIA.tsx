@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { AlertTriangle, Plus, ShieldCheck, Brain, Scale } from "lucide-react";
+import { AlertTriangle, Plus, ShieldCheck, Brain, Scale, Clock, CheckCircle2, XCircle, ShieldAlert, ClipboardCheck } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Cell, PieChart, Pie, Legend, RadarChart, Radar, PolarGrid, PolarAngleAxis,
@@ -73,20 +73,22 @@ export default function RiscosIA() {
   const [tab, setTab] = useState("dashboard");
   const [showCreate, setShowCreate] = useState(false);
   const [showComplianceForm, setShowComplianceForm] = useState(false);
+  const [showFairnessForm, setShowFairnessForm] = useState(false);
   const [form, setForm] = useState({
     modelName: "", title: "", description: "", category: "vies",
     level: "medio", probability: "3", impact: "3",
-    xaiMethod: "", xaiSummary: "", mitigationPlan: "", ownerName: "",
+    xaiMethod: "", xaiSummary: "", mitigationPlan: "",
   });
 
   const { data: summary, refetch: refetchSummary } = trpc.aiRisk.assessments.summary.useQuery();
   const { data: risks = [], refetch: refetchRisks } = trpc.aiRisk.assessments.list.useQuery();
+  const { data: fairnessAssessments = [], refetch: refetchFairness } = trpc.aiRisk.fairness.list.useQuery();
 
   const createRisk = trpc.aiRisk.assessments.create.useMutation({
     onSuccess: () => {
       toast.success("Risco registrado com sucesso!");
       setShowCreate(false);
-      setForm({ modelName: "", title: "", description: "", category: "vies", level: "medio", probability: "3", impact: "3", xaiMethod: "", xaiSummary: "", mitigationPlan: "", ownerName: "" });
+      setForm({ modelName: "", title: "", description: "", category: "vies", level: "medio", probability: "3", impact: "3", xaiMethod: "", xaiSummary: "", mitigationPlan: "" });
       refetchSummary();
       refetchRisks();
     },
@@ -134,7 +136,6 @@ export default function RiscosIA() {
       xaiMethod: form.xaiMethod || undefined,
       xaiSummary: form.xaiSummary || undefined,
       mitigationPlan: form.mitigationPlan || undefined,
-      ownerName: form.ownerName || undefined,
     });
   }
 
@@ -179,6 +180,7 @@ export default function RiscosIA() {
             <TabsTrigger value="matrix">Matriz de Risco</TabsTrigger>
             <TabsTrigger value="risks">Avaliações</TabsTrigger>
             <TabsTrigger value="compliance">Conformidade</TabsTrigger>
+            <TabsTrigger value="fairness">Fairness</TabsTrigger>
           </TabsList>
 
           {/* Dashboard Tab */}
@@ -367,6 +369,10 @@ export default function RiscosIA() {
 
           {/* Compliance Tab */}
           <TabsContent value="compliance" className="space-y-4">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 flex gap-2 items-start">
+              <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" />
+              <span><strong>Readiness, não certificação:</strong> NIST AI RMF é voluntário. Scores mostram somente checks revisados e coverage; não são certificação nem parecer jurídico.</span>
+            </div>
             <div className="flex justify-end mb-4">
               <Button onClick={() => setShowComplianceForm(true)} className="bg-[#1B3A8C] gap-2">
                 <ShieldCheck className="w-4 h-4" /> Nova Avaliação de Conformidade
@@ -387,6 +393,26 @@ export default function RiscosIA() {
                 </Card>
               ))}
             </div>
+          </TabsContent>
+
+          {/* Fairness Tab */}
+          <TabsContent value="fairness" className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="font-semibold text-gray-800">Avaliações de fairness contextual</h2>
+                <p className="text-xs text-gray-500">Somente contagens agregadas e códigos pseudônimos; métricas não afirmam fairness universal.</p>
+              </div>
+              <Button onClick={() => setShowFairnessForm(true)} className="bg-[#1B3A8C] gap-2">
+                <Scale className="w-4 h-4" /> Avaliar fairness
+              </Button>
+            </div>
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 flex gap-2 items-start">
+              <ClipboardCheck className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>Selection rate, statistical parity difference, disparate impact e equal opportunity são contextuais e aguardam avaliação humana. A amostra mínima é configurável; 20 é apenas uma sugestão, não uma norma.</span>
+            </div>
+            {fairnessAssessments.length === 0 ? (
+              <Card><CardContent className="py-10 text-center text-sm text-gray-400">Nenhuma avaliação de fairness registrada.</CardContent></Card>
+            ) : fairnessAssessments.map(a => <FairnessAssessmentCard key={a.id} assessment={a} onReviewed={refetchFairness} />)}
           </TabsContent>
         </Tabs>
 
@@ -446,9 +472,8 @@ export default function RiscosIA() {
                   <Label>Método XAI</Label>
                   <Input value={form.xaiMethod} onChange={e => setForm(f => ({ ...f, xaiMethod: e.target.value }))} placeholder="ex: SHAP, LIME, Grad-CAM" />
                 </div>
-                <div>
-                  <Label>Responsável</Label>
-                  <Input value={form.ownerName} onChange={e => setForm(f => ({ ...f, ownerName: e.target.value }))} placeholder="Nome do responsável" />
+                <div className="flex items-end">
+                  <p className="text-xs text-gray-500 pb-2">Responsável: usuário da sessão autenticada</p>
                 </div>
                 <div className="col-span-2">
                   <Label>Plano de Mitigação</Label>
@@ -466,156 +491,197 @@ export default function RiscosIA() {
         </Dialog>
 
         <ComplianceFormDialog open={showComplianceForm} onOpenChange={setShowComplianceForm} />
+        <FairnessFormDialog open={showFairnessForm} onOpenChange={setShowFairnessForm} onCompleted={refetchFairness} />
     </div>
   );
 }
 
 // ─── Sub-componente: Card de conformidade por framework ───────────────────────
 function ComplianceFrameworkCard({ framework, color }: { framework: "lgpd" | "eu_ai_act" | "iso_42001" | "nist_ai_rmf"; color: string }) {
-  const { data: checks = [] } = trpc.aiRisk.compliance.list.useQuery({ framework });
-  const passed = checks.filter(c => c.passed).length;
-  const total = checks.length;
-  const score = total > 0 ? Math.round((passed / total) * 100) : 0;
+  const { data: checks = [], refetch } = trpc.aiRisk.compliance.list.useQuery({ framework });
+  const review = trpc.aiRisk.compliance.review.useMutation({
+    onSuccess: () => { toast.success("Revisão registrada."); refetch(); },
+    onError: (error) => toast.error(error.message),
+  });
+  const reviewed = checks.filter(c => (c.status === "passed" || c.status === "failed") && c.reviewedAt);
+  const pending = checks.filter(c => !((c.status === "passed" || c.status === "failed") && c.reviewedAt) && c.status !== "not_applicable");
+  const passed = reviewed.filter(c => c.status === "passed").length;
+  const coverageBase = reviewed.length + pending.length;
+  const coverage = coverageBase > 0 ? Math.round((reviewed.length / coverageBase) * 100) : 0;
+
+  function requestReview(id: number, status: "passed" | "failed" | "not_applicable") {
+    const prompt = status === "not_applicable" ? "Justificativa obrigatória para N/A:" : "Notas da revisão humana (opcional):";
+    const reviewNotes = window.prompt(prompt);
+    if (reviewNotes === null || (status === "not_applicable" && !reviewNotes.trim())) return;
+    review.mutate({ id, status, reviewNotes: reviewNotes.trim() || undefined });
+  }
 
   return (
     <div className="space-y-2">
       <div className="flex justify-between items-center">
-        <span className="text-sm font-semibold" style={{ color }}>{score}%</span>
-        <span className="text-xs text-gray-400">{passed}/{total} verificações</span>
+        <span className="text-sm font-semibold" style={{ color }}>{reviewed.length}/{coverageBase} checks revisados</span>
+        <span className="text-xs text-gray-500">coverage {coverage}% · {passed} passed</span>
       </div>
       <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-        <div
-          className="h-full rounded-full transition-all duration-500"
-          style={{ width: `${score}%`, background: color }}
-        />
+        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${coverage}%`, background: color }} />
       </div>
-      {total === 0 && (
-        <p className="text-xs text-gray-400 mt-2">Nenhuma verificação registrada para este framework.</p>
-      )}
-      {checks.slice(0, 3).map(c => (
-        <div key={c.id} className="flex items-center gap-2 text-xs">
-          <span className={c.passed ? "text-green-600" : "text-red-500"}>{c.passed ? "✓" : "✗"}</span>
-          <span className="text-gray-600 truncate">{c.checkName}</span>
-        </div>
-      ))}
+      <p className="text-[11px] text-gray-500">Score = checks finais passados / checks revisados. N/A e pendentes ficam fora do score.</p>
+      {checks.length === 0 && <p className="text-xs text-gray-400 mt-2">Nenhuma verificação registrada para este framework.</p>}
+      {checks.slice(0, 5).map(c => {
+        const isPending = c.status !== "passed" && c.status !== "failed" && c.status !== "not_applicable";
+        return (
+          <div key={c.id} className="flex items-center gap-2 text-xs border-t pt-2">
+            {c.status === "passed" ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600" /> : c.status === "failed" ? <XCircle className="w-3.5 h-3.5 text-red-500" /> : <Clock className="w-3.5 h-3.5 text-amber-600" />}
+            <span className="text-gray-600 truncate flex-1">{c.checkName}</span>
+            <Badge variant="outline" className="text-[10px]">{c.status === "not_applicable" ? "N/A" : c.status === "pending_review" ? "Pendente" : c.status === "evidence_missing" ? "Sem evidência" : c.status}</Badge>
+            {isPending && <div className="flex gap-1">
+              <Button size="sm" variant="ghost" className="h-6 px-1 text-[10px] text-green-700" onClick={() => requestReview(c.id, "passed")}>Passar</Button>
+              <Button size="sm" variant="ghost" className="h-6 px-1 text-[10px] text-red-700" onClick={() => requestReview(c.id, "failed")}>Falhar</Button>
+              <Button size="sm" variant="ghost" className="h-6 px-1 text-[10px]" onClick={() => requestReview(c.id, "not_applicable")}>N/A</Button>
+            </div>}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
 // ─── Sub-componente: Formulário de Compliance ──────────────────────────────────
-function ComplianceFormDialog({ open, onOpenChange }: { open: boolean, onOpenChange: (val: boolean) => void }) {
+function ComplianceFormDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (val: boolean) => void }) {
   const { data: models = [] } = trpc.mlops.models.list.useQuery();
-  const [modelName, setModelName] = useState("");
+  const [modelId, setModelId] = useState("");
   const [framework, setFramework] = useState<"lgpd" | "eu_ai_act" | "iso_42001" | "nist_ai_rmf">("lgpd");
-  const [answers, setAnswers] = useState<Record<string, { passed: boolean, evidence: string }>>({});
-  
+  const [answers, setAnswers] = useState<Record<string, { passed: boolean; evidence: string }>>({});
   const upsert = trpc.aiRisk.compliance.upsert.useMutation();
+  const automatedEvaluate = trpc.aiRisk.compliance.automatedEvaluate.useMutation();
   const utils = trpc.useUtils();
+  const selectedModel = models.find(model => String(model.id) === modelId);
+  const checks = COMPLIANCE_TEMPLATES[framework] || [];
 
   const handleSave = async () => {
-    if (!modelName) { toast.error("Selecione um modelo"); return; }
-    
-    const checks = COMPLIANCE_TEMPLATES[framework] || [];
+    if (!selectedModel) { toast.error("Selecione um modelo"); return; }
+    const missingEvidence = checks.find(check => answers[check.checkName]?.passed && !answers[check.checkName]?.evidence.trim());
+    if (missingEvidence) { toast.error(`Evidência obrigatória para: ${missingEvidence.checkName}`); return; }
     let hasError = false;
     for (const check of checks) {
       const answer = answers[check.checkName] || { passed: false, evidence: "" };
       try {
-        await upsert.mutateAsync({
-          modelName,
-          framework,
-          checkName: check.checkName,
-          description: check.description,
-          passed: answer.passed,
-          evidence: answer.evidence,
-        });
-      } catch (e) {
-        console.error("Erro ao salvar compliance check", e);
+        await upsert.mutateAsync({ modelId: selectedModel.id, modelName: selectedModel.name, framework, checkName: check.checkName, description: check.description, passed: answer.passed, evidence: answer.evidence || undefined });
+      } catch (error) {
+        console.error("Erro ao salvar compliance check", error);
         hasError = true;
       }
     }
-    
-    if (hasError) {
-      toast.error("Ocorreu um erro ao salvar algumas verificações.");
-    } else {
-      toast.success("Avaliação de conformidade salva com sucesso!");
+    if (hasError) toast.error("Ocorreu um erro ao salvar algumas verificações.");
+    else {
+      toast.success("Checklist salvo como pendente de revisão humana.");
       utils.aiRisk.compliance.list.invalidate();
       onOpenChange(false);
       setAnswers({});
-      setModelName("");
+      setModelId("");
     }
+  };
+
+  const handleAutomatedEvaluate = async () => {
+    if (!selectedModel) { toast.error("Selecione um modelo"); return; }
+    try {
+      const result = await automatedEvaluate.mutateAsync({
+        modelId: selectedModel.id,
+        framework,
+        checks: checks.map(check => ({ checkName: check.checkName, description: check.description, evidencePresent: Boolean(answers[check.checkName]?.evidence.trim()) })),
+      });
+      toast.success(`${result.items.length} itens avaliados por presença de evidência; aguardando revisão.`);
+      utils.aiRisk.compliance.list.invalidate();
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Não foi possível executar a avaliação."); }
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Nova Avaliação de Conformidade</DialogTitle>
-          <DialogDescription>
-            Responda o checklist baseado no framework selecionado para atualizar o score de compliance do modelo.
-          </DialogDescription>
+          <DialogTitle>Nova avaliação de evidência/readiness</DialogTitle>
+          <DialogDescription>O envio nunca finaliza o check: uma pessoa Admin/Data Steward deve revisar. Isso não é certificação.</DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="flex flex-col gap-4">
-            <div>
-              <Label>Modelo de IA</Label>
-              <Select value={modelName} onValueChange={setModelName}>
-                <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
-                <SelectContent>
-                  {models.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Framework Regulatório</Label>
-              <Select value={framework} onValueChange={v => setFramework(v as any)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {Object.entries(FRAMEWORK_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
+            <div><Label>Modelo de IA</Label><Select value={modelId} onValueChange={setModelId}><SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger><SelectContent>{models.map(m => <SelectItem key={m.id} value={String(m.id)}>{m.name} ({m.version})</SelectItem>)}</SelectContent></Select></div>
+            <div><Label>Framework</Label><Select value={framework} onValueChange={value => setFramework(value as typeof framework)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.entries(FRAMEWORK_LABELS).map(([key, value]) => <SelectItem key={key} value={key}>{value}</SelectItem>)}</SelectContent></Select></div>
           </div>
-          
           <div className="space-y-4 mt-6 border-t pt-4">
             <h3 className="font-semibold text-[#1B3A8C] text-sm">Checklist: {FRAMEWORK_LABELS[framework]}</h3>
-            {(COMPLIANCE_TEMPLATES[framework] || []).map((check, idx) => {
-              const isPassed = answers[check.checkName]?.passed;
-              return (
-              <div key={idx} className={`p-4 border rounded-lg space-y-3 transition-colors ${isPassed ? 'bg-green-50 border-green-300' : 'bg-gray-50'}`}>
-                <div className="flex items-start gap-3">
-                  <Checkbox 
-                    id={`check-${idx}`} 
-                    checked={answers[check.checkName]?.passed || false}
-                    onCheckedChange={(checked) => setAnswers(prev => ({
-                      ...prev, 
-                      [check.checkName]: { ...prev[check.checkName], passed: checked === true }
-                    }))}
-                  />
-                  <div>
-                    <Label htmlFor={`check-${idx}`} className="font-medium cursor-pointer">{check.checkName}</Label>
-                    <p className="text-xs text-gray-500 mt-1">{check.description}</p>
-                  </div>
-                </div>
-                <Input 
-                  placeholder="Link para evidência ou justificativa (opcional)" 
-                  value={answers[check.checkName]?.evidence || ""}
-                  onChange={(e) => setAnswers(prev => ({
-                    ...prev, 
-                    [check.checkName]: { ...prev[check.checkName], evidence: e.target.value }
-                  }))}
-                  className="text-xs h-8 bg-white"
-                />
-              </div>
-            )})}
+            {checks.map((check, idx) => {
+              const answer = answers[check.checkName];
+              return <div key={idx} className={`p-4 border rounded-lg space-y-3 transition-colors ${answer?.passed ? "bg-green-50 border-green-300" : "bg-gray-50"}`}>
+                <div className="flex items-start gap-3"><Checkbox id={`check-${idx}`} checked={answer?.passed || false} onCheckedChange={checked => setAnswers(previous => ({ ...previous, [check.checkName]: { ...previous[check.checkName], passed: checked === true } }))} /><div><Label htmlFor={`check-${idx}`} className="font-medium cursor-pointer">{check.checkName}</Label><p className="text-xs text-gray-500 mt-1">{check.description}</p></div></div>
+                <Input required={Boolean(answer?.passed)} placeholder={answer?.passed ? "Evidência obrigatória para marcar pass (link ou referência)" : "Referência de evidência (opcional)"} value={answer?.evidence || ""} onChange={event => setAnswers(previous => ({ ...previous, [check.checkName]: { ...previous[check.checkName], evidence: event.target.value } }))} className="text-xs h-8 bg-white" />
+              </div>;
+            })}
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="gap-2 sm:gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button onClick={handleSave} disabled={upsert.isPending} className="bg-[#1B3A8C]">
-            {upsert.isPending ? "Salvando..." : "Salvar Avaliação"}
-          </Button>
+          <Button variant="secondary" onClick={handleAutomatedEvaluate} disabled={automatedEvaluate.isPending || !selectedModel}><Brain className="w-4 h-4 mr-1" />{automatedEvaluate.isPending ? "Avaliando…" : "Avaliar presença"}</Button>
+          <Button onClick={handleSave} disabled={upsert.isPending || !selectedModel} className="bg-[#1B3A8C]">{upsert.isPending ? "Salvando…" : "Salvar pendente"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
+}
+
+// ─── Fairness: entrada e revisão de agregados ───────────────────────────────────
+type FairnessGroupForm = { code: string; sampleSize: string; positivePredictionCount: string; actualPositiveCount: string; truePositiveCount: string };
+const emptyFairnessGroup = (code: string): FairnessGroupForm => ({ code, sampleSize: "20", positivePredictionCount: "0", actualPositiveCount: "", truePositiveCount: "" });
+
+function FairnessFormDialog({ open, onOpenChange, onCompleted }: { open: boolean; onOpenChange: (value: boolean) => void; onCompleted: () => void }) {
+  const { data: models = [] } = trpc.mlops.models.list.useQuery();
+  const [modelId, setModelId] = useState("");
+  const [datasetName, setDatasetName] = useState("");
+  const [datasetVersion, setDatasetVersion] = useState("");
+  const [modelVersion, setModelVersion] = useState("");
+  const [protectedAttribute, setProtectedAttribute] = useState("");
+  const [threshold, setThreshold] = useState("");
+  const [minimumGroupSize, setMinimumGroupSize] = useState("20");
+  const [methodology, setMethodology] = useState("Comparação de taxas em uma amostra agregada; resultados sujeitos a revisão humana.");
+  const [groups, setGroups] = useState<FairnessGroupForm[]>([emptyFairnessGroup("g_a"), emptyFairnessGroup("g_b")]);
+  const evaluate = trpc.aiRisk.fairness.evaluate.useMutation();
+  const selectedModel = models.find(model => String(model.id) === modelId);
+  const result = evaluate.data;
+
+  function updateGroup(index: number, field: keyof FairnessGroupForm, value: string) { setGroups(previous => previous.map((group, i) => i === index ? { ...group, [field]: value } : group)); }
+  function parseOptional(value: string) { return value.trim() === "" ? undefined : Number(value); }
+  async function handleEvaluate() {
+    if (!selectedModel || !datasetName || !datasetVersion || !modelVersion || !protectedAttribute || !methodology) { toast.error("Preencha modelo, versões, atributo e metodologia."); return; }
+    try {
+      const response = await evaluate.mutateAsync({
+        modelId: selectedModel.id, modelName: selectedModel.name, modelVersion, datasetName, datasetVersion, protectedAttribute,
+        decisionThreshold: parseOptional(threshold), minimumGroupSize: Number(minimumGroupSize), methodology,
+        groups: groups.map(group => ({ code: group.code, sampleSize: Number(group.sampleSize), positivePredictionCount: Number(group.positivePredictionCount), actualPositiveCount: parseOptional(group.actualPositiveCount), truePositiveCount: parseOptional(group.truePositiveCount) })),
+      });
+      toast.success("Métricas calculadas; estado: awaiting review.");
+      onCompleted();
+      return response;
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Não foi possível calcular fairness."); }
+  }
+
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>Avaliação agregada de fairness</DialogTitle><DialogDescription>Informe apenas contagens por grupo com códigos pseudônimos g_…; nunca dados de linha, nomes ou identificadores diretos.</DialogDescription></DialogHeader>
+    <div className="grid grid-cols-2 gap-3 py-2">
+      <div className="col-span-2"><Label>Modelo</Label><Select value={modelId} onValueChange={value => { setModelId(value); const model = models.find(item => String(item.id) === value); if (model && !modelVersion) setModelVersion(model.version); }}><SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger><SelectContent>{models.map(model => <SelectItem key={model.id} value={String(model.id)}>{model.name}</SelectItem>)}</SelectContent></Select></div>
+      <div><Label>Versão do modelo</Label><Input value={modelVersion} onChange={event => setModelVersion(event.target.value)} /></div><div><Label>Atributo protegido</Label><Input value={protectedAttribute} onChange={event => setProtectedAttribute(event.target.value)} placeholder="atributo declarado" /></div>
+      <div><Label>Dataset</Label><Input value={datasetName} onChange={event => setDatasetName(event.target.value)} /></div><div><Label>Versão do dataset</Label><Input value={datasetVersion} onChange={event => setDatasetVersion(event.target.value)} /></div>
+      <div><Label>Limiar de decisão (opcional)</Label><Input type="number" min="0" max="1" step="0.01" value={threshold} onChange={event => setThreshold(event.target.value)} /></div><div><Label>Amostra mínima configurável</Label><Input type="number" min="1" value={minimumGroupSize} onChange={event => setMinimumGroupSize(event.target.value)} /><p className="text-[10px] text-gray-500 mt-1">Sugestão: ≥20; não é norma.</p></div>
+      <div className="col-span-2"><Label>Metodologia declarada</Label><Textarea value={methodology} onChange={event => setMethodology(event.target.value)} rows={2} /></div>
+    </div>
+    <div className="space-y-3 border-t pt-3"><div className="flex justify-between items-center"><h3 className="font-semibold text-sm">Grupos agregados (mínimo 2)</h3><Button variant="outline" size="sm" onClick={() => setGroups(previous => [...previous, emptyFairnessGroup(`g_${String.fromCharCode(97 + previous.length)}`)])}>Adicionar grupo</Button></div>
+      {groups.map((group, index) => <div key={index} className="grid grid-cols-5 gap-2 items-end"><div><Label className="text-[10px]">Código pseudônimo</Label><Input value={group.code} onChange={event => updateGroup(index, "code", event.target.value)} /></div><div><Label className="text-[10px]">Amostra</Label><Input type="number" min="1" value={group.sampleSize} onChange={event => updateGroup(index, "sampleSize", event.target.value)} /></div><div><Label className="text-[10px]">Pred. positiva</Label><Input type="number" min="0" value={group.positivePredictionCount} onChange={event => updateGroup(index, "positivePredictionCount", event.target.value)} /></div><div><Label className="text-[10px]">Actual + (opcional)</Label><Input type="number" min="0" value={group.actualPositiveCount} onChange={event => updateGroup(index, "actualPositiveCount", event.target.value)} /></div><div className="flex gap-1"><div className="flex-1"><Label className="text-[10px]">True + (opcional)</Label><Input type="number" min="0" value={group.truePositiveCount} onChange={event => updateGroup(index, "truePositiveCount", event.target.value)} /></div>{groups.length > 2 && <Button variant="ghost" size="sm" className="h-9 px-1" onClick={() => setGroups(previous => previous.filter((_, i) => i !== index))}>×</Button>}</div></div>)}
+    </div>
+    {result && <div className="rounded-lg bg-gray-50 border p-3 text-xs space-y-1"><strong>Métricas calculadas — awaiting review</strong><div>SPD: {Number(result.metrics.statisticalParityDifference).toFixed(4)} · DIR: {result.metrics.disparateImpactRatio === null ? "n/a" : result.metrics.disparateImpactRatio.toFixed(4)} · EOD: {result.metrics.equalOpportunityDifference === null ? "n/a (sem ground truth)" : result.metrics.equalOpportunityDifference.toFixed(4)}</div><p className="text-gray-500">Contextual; não afirma fairness universal e exige revisão humana.</p></div>}
+    <DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Fechar</Button><Button onClick={handleEvaluate} disabled={evaluate.isPending} className="bg-[#1B3A8C]">{evaluate.isPending ? "Calculando…" : "Calcular e enviar para revisão"}</Button></DialogFooter>
+  </DialogContent></Dialog>;
+}
+
+function FairnessAssessmentCard({ assessment, onReviewed }: { assessment: any; onReviewed: () => void }) {
+  const review = trpc.aiRisk.fairness.review.useMutation({ onSuccess: () => { toast.success("Revisão de fairness registrada."); onReviewed(); }, onError: error => toast.error(error.message) });
+  const metrics = assessment.metrics as Record<string, number | null>;
+  function decide(decision: "approved" | "rejected" | "needs_changes") { const notes = window.prompt("Justificativa da revisão:"); if (notes?.trim()) review.mutate({ id: assessment.id, decision, reviewNotes: notes.trim() }); }
+  return <Card><CardContent className="p-4 space-y-2"><div className="flex items-center justify-between"><div><p className="font-medium text-sm">{assessment.modelName} · {assessment.modelVersion}</p><p className="text-xs text-gray-500">{assessment.datasetName} {assessment.datasetVersion} · atributo: {assessment.protectedAttribute}</p></div><Badge variant="outline">{assessment.status === "pending_review" ? "Aguardando revisão" : assessment.status}</Badge></div><div className="grid grid-cols-3 gap-2 text-xs"><span>SPD: {Number(metrics.statisticalParityDifference).toFixed(4)}</span><span>DIR: {metrics.disparateImpactRatio === null ? "n/a" : Number(metrics.disparateImpactRatio).toFixed(4)}</span><span>EOD: {metrics.equalOpportunityDifference === null ? "n/a" : Number(metrics.equalOpportunityDifference).toFixed(4)}</span></div>{assessment.status === "pending_review" && <div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => decide("approved")}>Aprovar</Button><Button size="sm" variant="outline" onClick={() => decide("needs_changes")}>Solicitar ajustes</Button><Button size="sm" variant="outline" onClick={() => decide("rejected")}>Rejeitar</Button></div>}</CardContent></Card>;
 }
